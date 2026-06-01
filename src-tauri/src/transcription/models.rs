@@ -27,7 +27,29 @@ struct ModelDescriptor {
     blurb: &'static str,
     parameter_count: &'static str,
     download_base_url: &'static str,
+    /// Files that must exist locally for the model to be considered downloaded.
     required_files: &'static [&'static str],
+    /// Mapping from URL filename → local filename. If empty, `required_files`
+    /// filenames are used for both the download URL and the local path.
+    download_files: &'static [(&'static str, &'static str)],
+}
+
+impl ModelDescriptor {
+    /// Returns the (url_filename, local_filename) pairs for downloading.
+    /// Falls back to using required_files as both url and local names when download_files is empty.
+    fn download_pairs(&self) -> Vec<(&str, &str)> {
+        if self.download_files.is_empty() {
+            self.required_files
+                .iter()
+                .map(|f| (*f, *f))
+                .collect()
+        } else {
+            self.download_files
+                .iter()
+                .map(|(url, local)| (*url, *local))
+                .collect()
+        }
+    }
 }
 
 const MODEL_REGISTRY: &[ModelDescriptor] = &[
@@ -50,6 +72,7 @@ const MODEL_REGISTRY: &[ModelDescriptor] = &[
             "streaming_config.json",
             "tokenizer.bin",
         ],
+        download_files: &[],
     },
     ModelDescriptor {
         id: "medium_streaming",
@@ -70,22 +93,29 @@ const MODEL_REGISTRY: &[ModelDescriptor] = &[
             "streaming_config.json",
             "tokenizer.bin",
         ],
+        download_files: &[],
     },
     ModelDescriptor {
         id: "parakeet_tdt_0.6b_v3",
         arch: ModelArch::ParakeetTdt,
         dir_name: "parakeet-tdt-0.6b-v3",
         display_name: "Parakeet TDT 0.6B v3",
-        size_bytes: 2_500_000_000,
+        size_bytes: 933_000_000,
         wer: "~5% WER",
         blurb: "NVIDIA's state-of-the-art multilingual model. 25 languages with automatic detection. Best accuracy.",
         parameter_count: "600M",
-        download_base_url: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main",
+        download_base_url: "https://huggingface.co/nasedkinpv/parakeet-tdt-0.6b-v3-onnx-int8/resolve/main",
         required_files: &[
-            "encoder-model.onnx",
-            "encoder-model.onnx.data",
-            "decoder_joint-model.onnx",
+            "encoder-int8.onnx",
+            "encoder-int8.onnx.data",
+            "decoder_joint-model.int8.onnx",
             "vocab.txt",
+        ],
+        download_files: &[
+            ("encoder-int8.onnx", "encoder-int8.onnx"),
+            ("encoder-int8.onnx.data", "encoder-int8.onnx.data"),
+            ("decoder_joint-int8.onnx", "decoder_joint-model.int8.onnx"),
+            ("vocab.txt", "vocab.txt"),
         ],
     },
 ];
@@ -244,26 +274,27 @@ pub async fn download_model(
         .map_err(|e| format!("Failed to create model directory: {e}"))?;
 
     let client = reqwest::Client::new();
-    let total_files = descriptor.required_files.len();
+    let download_pairs = descriptor.download_pairs();
+    let total_files = download_pairs.len();
     let result: Result<(), String> = async {
-        for (file_index, file_name) in descriptor.required_files.iter().enumerate() {
+        for (file_index, (url_name, local_name)) in download_pairs.iter().enumerate() {
             if cancel_token.load(Ordering::Relaxed) {
                 return Err("Download cancelled".to_string());
             }
 
-            let url = format!("{}/{}", descriptor.download_base_url, file_name);
-            let dest_path = model_dir.join(file_name);
+            let url = format!("{}/{}", descriptor.download_base_url, url_name);
+            let dest_path = model_dir.join(local_name);
 
             let response = client
                 .get(&url)
                 .send()
                 .await
-                .map_err(|e| format!("Failed to download {file_name}: {e}"))?;
+                .map_err(|e| format!("Failed to download {local_name}: {e}"))?;
 
             let status = response.status();
             if !status.is_success() {
                 return Err(format!(
-                    "Failed to download {file_name}: HTTP {}",
+                    "Failed to download {local_name}: HTTP {}",
                     status.as_u16()
                 ));
             }
@@ -274,7 +305,7 @@ pub async fn download_model(
 
             let mut file = tokio::fs::File::create(&dest_path)
                 .await
-                .map_err(|e| format!("Failed to create file {file_name}: {e}"))?;
+                .map_err(|e| format!("Failed to create file {local_name}: {e}"))?;
 
             let mut downloaded: u64 = 0;
             let mut stream = response.bytes_stream();
@@ -286,10 +317,10 @@ pub async fn download_model(
                 }
 
                 let chunk = chunk_result
-                    .map_err(|e| format!("Error reading response for {file_name}: {e}"))?;
+                    .map_err(|e| format!("Error reading response for {local_name}: {e}"))?;
                 file.write_all(&chunk)
                     .await
-                    .map_err(|e| format!("Error writing file {file_name}: {e}"))?;
+                    .map_err(|e| format!("Error writing file {local_name}: {e}"))?;
 
                 downloaded += chunk.len() as u64;
 
@@ -316,7 +347,7 @@ pub async fn download_model(
 
             file.flush()
                 .await
-                .map_err(|e| format!("Error flushing file {file_name}: {e}"))?;
+                .map_err(|e| format!("Error flushing file {local_name}: {e}"))?;
         }
 
         Ok(())

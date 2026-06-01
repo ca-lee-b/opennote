@@ -56,3 +56,9 @@ export interface ModelDownloadProgressEvent {
 export interface AudioLevelEvent {
   level: number;
 }
+
+export interface PartialTranscriptionEvent {
+  isFinal: boolean;
+  startTimeSecs: number;
+  text: string;
+}

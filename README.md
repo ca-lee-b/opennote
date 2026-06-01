@@ -1,131 +1,127 @@
-# Tauri: An Ultimate Project Template
+# OpenNote
 
-[![NPM Version](https://img.shields.io/npm/v/create-tauri-react)](https://www.npmjs.com/package/create-tauri-react)
-[![NPM Downloads](https://img.shields.io/npm/dm/create-tauri-react)](https://www.npmjs.com/package/create-tauri-react)
+Privacy-first, on-device audio transcription — powered by local AI models running entirely on your machine.
 
-This template should help get you started developing with [Tauri](https://tauri.app), [React](https://reactjs.org), [Typescript](https://typescriptlang.org) and [Tailwind CSS](https://tailwindcss.com) (w/ [shadcn/ui](https://ui.shadcn.com/)) in [Vite](https://vitejs.dev).
+OpenNote is a desktop app that records audio from your microphone or system audio and transcribes it in real time using locally-run neural models. No cloud APIs, no data leaving your device. Everything stays on your machine.
 
-The architecture is based on practices suggested by [@alan2207](https://github.com/alan2207) in his [bulletproof-react](https://github.com/alan2207/bulletproof-react/blob/master/docs/project-structure.md).
+Built with [Tauri v2](https://v2.tauri.app/) (Rust backend), [React 19](https://react.dev/), [TypeScript](https://typescriptlang.org/), [Tailwind CSS v4](https://tailwindcss.com/), and [shadcn/ui](https://ui.shadcn.com/).
 
-In addition, this template configures [Biome](https://biomejs.dev/) (via [ultracite](https://github.com/haydenbleasel/ultracite)) for linting and formatting, and [Husky](https://typicode.github.io/husky/) and [Lint-staged](https://github.com/lint-staged/lint-staged) for pre-commits.
+![OpenNote Screenshot](./assets/demo.png)
 
-![Demo Screenshot](./assets/demo.png)
+## Features
+
+- **Local transcription** — Audio is transcribed by neural models (Moonshine, Parakeet TDT) running directly on your device. No server round-trips.
+- **Microphone & system audio** — Record from your microphone or capture computer audio (macOS 13+ with Screen Recording permission).
+- **Model management** — Download, switch, and delete transcription models from an in-app settings panel. Models are stored locally.
+- **Transcript editing** — View, search, and edit individual transcript lines. Rename recordings, mark partial transcriptions.
+- **Audio playback & export** — Replay recordings, export transcripts, and manage audio files.
+- **SQLite storage** — All recordings and transcripts are persisted in a local SQLite database with automatic migrations.
+- **Custom title bar** — Native-feeling overlay title bar for a clean, minimal UI.
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Desktop runtime | [Tauri v2](https://v2.tauri.app/) (Rust) |
+| Frontend | React 19, TypeScript, Vite |
+| Styling | Tailwind CSS v4, shadcn/ui (new-york style) |
+| State | Zustand |
+| Routing | react-router v7 |
+| Database | SQLite via `tauri-plugin-sql` |
+| Transcription | `transcribe-rs` (ONNX), `parakeet-rs` |
+| Audio | `cpal`, `hound` (WAV capture & encoding) |
+| Validation | Zod |
+| Linting | Biome via ultracite, Husky + lint-staged |
 
 ## Getting Started
 
-### Basics
+### Prerequisites
 
-Ensure that you have the [Tauri prerequisites](https://tauri.app/v1/guides/getting-started/prerequisites) installed.
+- [Tauri v2 prerequisites](https://v2.tauri.app/start/prerequisites/) (Rust toolchain, platform SDKs)
+- [Bun](https://bun.sh) (or npm/pnpm/yarn)
+- macOS (system audio recording requires macOS 13+)
 
-#### Create a new project
+### Install
 
 ```bash
-npx create-tauri-react@latest
+git clone https://github.com/caleblee/opennote-rs.git
+cd opennote-rs
+bun install
 ```
 
-## What's included
+### Development
 
-### Core
-
-A basic Tauri setup with Vite, React, Typescript.
-
-#### Tailwind CSS
-
-A basic Tailwind CSS setup. Includes a `components.json` for Shadcn UI components.
-
-### Dev Tools
-
-#### Biome (via ultracite)
-
-[Biome](https://biomejs.dev/) is configured through [ultracite](https://github.com/haydenbleasel/ultracite) for linting and formatting. Run `bun run check` to check and `bun run fix` to auto-fix.
-
-#### Husky + Lint-staged
-
-Pre-commit hooks to run Biome on staged files.
-
-## Using a Different Package Manager
-
-This template uses [bun](https://bun.sh) by default. To use a different package manager (npm, pnpm, yarn, etc.), update the following:
-
-1. **`src-tauri/tauri.conf.json`** — Replace the `beforeDevCommand` and `beforeBuildCommand`:
-   ```jsonc
-   // For npm/yarn/pnpm:
-   "beforeDevCommand": "<pm> run dev",
-   "beforeBuildCommand": "<pm> run build",
-   ```
-2. **`.husky/pre-commit`** — Replace `bunx` with your package manager's equivalent:
-   ```sh
-   npx lint-staged        # npm
-   pnpm dlx lint-staged   # pnpm
-   yarn dlx lint-staged   # yarn
-   ```
-3. **`package.json`** — Update the `lint-staged` command:
-   ```jsonc
-   "lint-staged": {
-     "*.{js,jsx,ts,tsx,json,jsonc,css,scss,md,mdx}": [
-       "npx ultracite fix"        // npm
-       // "pnpm dlx ultracite fix" // pnpm
-       // "yarn dlx ultracite fix" // yarn
-     ]
-   }
-   ```
-4. Delete `bun.lock` and run your package manager's install command to generate a new lock file.
-
-## How to use?
-
-Once again, the architecture of the template is based on practices proposed by [@alan2207](https://github.com/alan2207) in his [bulletproof-react](https://github.com/alan2207/bulletproof-react/blob/master/docs/project-structure.md).
-
-```
-src
-|
-+-- app               # application layer containing:
-|   |                 # this folder might differ based on the meta framework used
-|   +-- routes        # application routes / can also be pages
-|   +-- app.tsx       # main application component
-|   +-- provider.tsx  # application provider that wraps the entire application with different global providers - this might also differ based on meta framework used
-|   +-- router.tsx    # application router configuration
-+-- assets            # assets folder can contain all the static files such as images, fonts, etc.
-|
-+-- components        # shared components used across the entire application
-|
-+-- config            # global configurations, exported env variables etc.
-|
-+-- features          # feature based modules
-|
-+-- hooks             # shared hooks used across the entire application
-|
-+-- lib               # reusable libraries preconfigured for the application
-|
-+-- stores            # global state stores
-|
-+-- testing           # test utilities and mocks
-|
-+-- types             # shared types used across the application
-|
-+-- utils             # shared utility functions
+```bash
+# Start the Tauri dev environment (Rust + frontend hot reload)
+bun run tauri dev
 ```
 
-```
-src/features/awesome-feature
-|
-+-- api         # exported API request declarations and api hooks related to a specific feature
-|
-+-- assets      # assets folder can contain all the static files for a specific feature
-|
-+-- components  # components scoped to a specific feature
-|
-+-- hooks       # hooks scoped to a specific feature
-|
-+-- stores      # state stores for a specific feature
-|
-+-- types       # typescript types used within the feature
-|
-+-- utils       # utility functions for a specific feature
+The frontend dev server runs on `http://localhost:1420`.
+
+### Production Build
+
+```bash
+bun run tauri build
 ```
 
-So, simply put:
+## Project Structure
 
-- Define your app's routes in `src/app/router.tsx` and `src/app/routes/*` with minimal business logic.
-- The pages from the routes should be using `src/features` to build up functionality on the page.
-- The features should be using components from `src/components`, which are pure ui components (like [Shadcn UI](https://ui.shadcn.com/)) or layouts.
-- For an extended template, you can look up [`@MrLightful/powersync-tauri`](https://github.com/MrLightful/powersync-tauri), which also defines `src/config` and `src/hooks` examples.
+```
+opennote-rs/
+├── src/                          # Frontend (React + TypeScript)
+│   ├── app/                      # App shell — providers, router, routes
+│   ├── components/ui/            # shadcn/ui primitives
+│   ├── config/                   # Zod-validated env vars
+│   ├── features/
+│   │   ├── recording/           # Live recording UI, waveform, dialog
+│   │   ├── transcription/       # Transcription service, model types
+│   │   ├── library/             # Recording list, sidebar, detail view
+│   │   ├── settings/            # Model management, download progress
+│   │   ├── errors/              # Error boundary pages
+│   │   └── built-with/          # Tech stack showcase
+│   ├── stores/                   # Zustand stores (recordings)
+│   ├── types/                    # Shared TypeScript types
+│   ├── hooks/                    # Shared custom hooks
+│   ├── lib/                      # Utilities (cn, env helpers)
+│   └── main.tsx                  # Entry point
+├── src-tauri/                    # Rust backend (Tauri v2)
+│   ├── src/
+│   │   ├── main.rs              # App entry, DB migrations, command registration
+│   │   └── transcription/       # Audio capture, model loading, transcription
+│   │       ├── mod.rs            # Tauri commands, state, permissions
+│   │       ├── audio.rs          # Microphone & system audio capture (cpal)
+│   │       ├── worker.rs         # Transcription worker thread
+│   │       ├── moonshine.rs      # Moonshine ONNX model integration
+│   │       ├── parakeet.rs       # Parakeet TDT model integration
+│   │       └── models.rs         # Model download & management
+│   ├── Cargo.toml
+│   └── tauri.conf.json
+└── package.json
+```
+
+## Architecture
+
+The app follows [bulletproof-react](https://github.com/alan2207/bulletproof-react) conventions — feature-based modules with colocated components, hooks, API services, types, and stores.
+
+**Data flow:**
+
+1. **Recording** — The Rust backend captures audio via `cpal`, writes WAV files, and streams audio-level events to the frontend.
+2. **Transcription** — A background worker loads an ONNX-based model (Moonshine or Parakeet TDT) and transcribes audio in real time, emitting line-level updates to the frontend.
+3. **Storage** — Recordings and transcript lines are persisted in SQLite via `tauri-plugin-sql` with automatic schema migrations.
+4. **State** — The frontend uses Zustand stores that wrap the SQL repository, keeping the UI in sync with the database.
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `bun run dev` | Start Vite dev server (frontend only) |
+| `bun run tauri dev` | Start Tauri dev (Rust + frontend) |
+| `bun run build` | TypeScript check + Vite build |
+| `bun run tauri build` | Production Tauri build |
+| `bun run check` | Biome lint/format check |
+| `bun run fix` | Biome lint/format auto-fix |
+| `bun run typecheck` | TypeScript type check only |
+
+## License
+
+[MIT](./LICENSE)

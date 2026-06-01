@@ -90,8 +90,8 @@ function TranscriptLineEditor({
 
   return (
     <div>
-      <div className="flex items-start gap-3 py-2">
-        <span className="w-12 shrink-0 pt-1 text-right font-medium text-muted-foreground text-xs tabular-nums">
+      <div className="flex items-start gap-4 py-2">
+        <span className="w-12 shrink-0 pt-2 text-right font-medium text-muted-foreground text-xs tabular-nums">
           {elapsed}
         </span>
         <Textarea

@@ -4,6 +4,7 @@ use transcribe_rs::onnx::Quantization;
 use transcribe_rs::transcriber::{
     EnergyAdaptiveChunked, EnergyAdaptiveConfig, Transcriber,
 };
+use transcribe_rs::SpeechModel;
 use transcribe_rs::TranscribeOptions;
 
 pub struct StreamingModel {
@@ -19,6 +20,10 @@ impl StreamingModel {
             .map_err(|error| error.to_string())?;
 
         Ok(Self { inner })
+    }
+
+    pub fn as_speech_model(&mut self) -> &mut dyn SpeechModel {
+        &mut self.inner
     }
 
     pub fn transcribe_file(&mut self, wav_path: &Path) -> Result<String, String> {

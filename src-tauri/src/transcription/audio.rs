@@ -42,14 +42,19 @@ pub fn start_audio_capture(
     app: AppHandle,
     wav_path: PathBuf,
     source: AudioSource,
+    sample_tx: Option<std::sync::mpsc::Sender<Vec<f32>>>,
 ) -> Result<AudioCapture, String> {
     match source {
-        AudioSource::Microphone => start_microphone_capture(app, wav_path),
-        AudioSource::ComputerAudio => start_computer_audio_capture(app, wav_path),
+        AudioSource::Microphone => start_microphone_capture(app, wav_path, sample_tx),
+        AudioSource::ComputerAudio => start_computer_audio_capture(app, wav_path, sample_tx),
     }
 }
 
-fn start_microphone_capture(app: AppHandle, wav_path: PathBuf) -> Result<AudioCapture, String> {
+fn start_microphone_capture(
+    app: AppHandle,
+    wav_path: PathBuf,
+    sample_tx: Option<std::sync::mpsc::Sender<Vec<f32>>>,
+) -> Result<AudioCapture, String> {
     let host = cpal::default_host();
     let device = host
         .default_input_device()
@@ -76,6 +81,7 @@ fn start_microphone_capture(app: AppHandle, wav_path: PathBuf) -> Result<AudioCa
     let writer_clone = writer.clone();
     let resample_ratio = native_sample_rate as f64 / 16000.0;
     let app_emit = app.clone();
+    let sample_tx_mic = sample_tx.clone();
 
     let capture_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
         let mono = downmix(data, channels);
@@ -85,6 +91,10 @@ fn start_microphone_capture(app: AppHandle, wav_path: PathBuf) -> Result<AudioCa
             let rms = compute_rms(&resampled);
             let level = (rms * 5.0).min(1.0);
             let _ = app_emit.emit("audio-level", AudioLevelEvent { level });
+        }
+
+        if let Some(ref tx) = sample_tx_mic {
+            let _ = tx.send(resampled.clone());
         }
 
         if let Some(ref w) = writer_clone {
@@ -113,6 +123,7 @@ fn start_microphone_capture(app: AppHandle, wav_path: PathBuf) -> Result<AudioCa
         SampleFormat::I16 => {
             let app_emit2 = app.clone();
             let writer_clone2 = writer.clone();
+            let sample_tx_i16 = sample_tx;
             device
                 .build_input_stream(
                     &stream_config,
@@ -125,6 +136,10 @@ fn start_microphone_capture(app: AppHandle, wav_path: PathBuf) -> Result<AudioCa
                             let rms = compute_rms(&resampled);
                             let level = (rms * 5.0).min(1.0);
                             let _ = app_emit2.emit("audio-level", AudioLevelEvent { level });
+                        }
+
+                        if let Some(ref tx) = sample_tx_i16 {
+                            let _ = tx.send(resampled.clone());
                         }
 
                         if let Some(ref w) = writer_clone2 {
@@ -170,6 +185,7 @@ fn start_microphone_capture(app: AppHandle, wav_path: PathBuf) -> Result<AudioCa
 struct SystemAudioCallbackContext {
     app: AppHandle,
     writer: WavWriterHandle,
+    sample_tx: Option<std::sync::mpsc::Sender<Vec<f32>>>,
 }
 
 #[cfg(target_os = "macos")]
@@ -240,6 +256,9 @@ extern "C" fn receive_system_audio(samples: *const f32, count: usize, context: *
     let context = unsafe { &*(context.cast::<SystemAudioCallbackContext>()) };
     write_samples(&context.writer, samples);
     emit_audio_level(&context.app, samples);
+    if let Some(ref tx) = context.sample_tx {
+        let _ = tx.send(samples.to_vec());
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -259,11 +278,16 @@ fn take_bridge_error(error: *mut c_char) -> String {
 }
 
 #[cfg(target_os = "macos")]
-fn start_computer_audio_capture(app: AppHandle, wav_path: PathBuf) -> Result<AudioCapture, String> {
+fn start_computer_audio_capture(
+    app: AppHandle,
+    wav_path: PathBuf,
+    sample_tx: Option<std::sync::mpsc::Sender<Vec<f32>>>,
+) -> Result<AudioCapture, String> {
     let writer = Arc::new(Mutex::new(Some(create_wav_writer(&wav_path)?)));
     let callback_context = Box::into_raw(Box::new(SystemAudioCallbackContext {
         app,
         writer: Arc::clone(&writer),
+        sample_tx,
     }));
     let mut error = std::ptr::null_mut();
     // SAFETY: callback_context remains boxed until SystemAudioCapture stops or start fails.
@@ -296,6 +320,7 @@ fn start_computer_audio_capture(app: AppHandle, wav_path: PathBuf) -> Result<Aud
 fn start_computer_audio_capture(
     _app: AppHandle,
     _wav_path: PathBuf,
+    _sample_tx: Option<std::sync::mpsc::Sender<Vec<f32>>>,
 ) -> Result<AudioCapture, String> {
     Err("Computer audio recording is only available on macOS 13 or newer.".to_string())
 }

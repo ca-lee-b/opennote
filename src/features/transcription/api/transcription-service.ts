@@ -6,6 +6,7 @@ import type {
   LoadTranscriptionModelRequest,
   ModelDownloadInfo,
   ModelDownloadProgressEvent,
+  PartialTranscriptionEvent,
   RecordingData,
   TranscriptionResult,
   TranscriptionStateSnapshot,
@@ -60,6 +61,14 @@ export function listenToAudioLevels(
   handler: (event: AudioLevelEvent) => void
 ): Promise<UnlistenFn> {
   return listen<AudioLevelEvent>("audio-level", (event) => {
+    handler(event.payload);
+  });
+}
+
+export function listenToPartialTranscription(
+  handler: (event: PartialTranscriptionEvent) => void
+): Promise<UnlistenFn> {
+  return listen<PartialTranscriptionEvent>("transcription-partial", (event) => {
     handler(event.payload);
   });
 }

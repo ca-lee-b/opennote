@@ -5,6 +5,7 @@ import {
   getDownloadedModels,
   getSystemAudioPermission,
   listenToAudioLevels,
+  listenToPartialTranscription,
   loadTranscriptionModel,
   openSystemAudioSettings,
   startTranscriptionRecording,
@@ -58,7 +59,12 @@ export function useActiveRecording() {
       const unlisten = await listenToAudioLevels((e: AudioLevelEvent) =>
         setAudioLevel(e.level)
       );
-      unlistenRefs.current = [unlisten];
+      const unlistenPartial = await listenToPartialTranscription((event) => {
+        console.log(
+          `[streaming] ${event.isFinal ? "FINAL" : "partial"} @${event.startTimeSecs.toFixed(1)}s: ${event.text}`
+        );
+      });
+      unlistenRefs.current = [unlisten, unlistenPartial];
 
       const models = await getDownloadedModels();
       const model = models.find((m) => m.isDownloaded);
