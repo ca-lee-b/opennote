@@ -1,0 +1,48 @@
+{
+  "build": {
+    "beforeDevCommand": "bun run dev",
+    "beforeBuildCommand": "bun run build",
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420"
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "entitlements": "./OpenNote.entitlements"
+    }
+  },
+  "productName": "OpenNote",
+  "version": "0.1.0",
+  "identifier": "dev.caleblee.opennote",
+  "plugins": {
+    "process": {
+      "active": true
+    },
+    "sql": {
+      "preload": ["sqlite:opennote.db"]
+    }
+  },
+  "app": {
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "title": "OpenNote",
+        "width": 700,
+        "height": 800,
+        "dragDropEnabled": false,
+        "hiddenTitle": true,
+        "titleBarStyle": "Overlay"
+      }
+    ]
+  }
+}
