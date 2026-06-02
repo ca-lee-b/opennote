@@ -1,11 +1,14 @@
 import {
+  AudioWave01Icon,
   Cancel01Icon,
+  Clock01Icon,
   Mic01Icon,
+  Note01Icon,
   Search01Icon,
   Settings02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { type MouseEvent, useMemo, useRef } from "react";
+import { type MouseEvent, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Sidebar,
@@ -16,6 +19,7 @@ import {
   SidebarHeader,
   SidebarInput,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   useSidebar,
@@ -31,6 +35,29 @@ interface LibrarySidebarProps {
   onOpenSettings?: () => void;
 }
 
+type LibrarySection = "all" | "recents";
+
+function RecentsEmptyState() {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center rounded-xl border border-border/70 border-dashed bg-background/40 p-8 text-center">
+      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-md border border-border bg-background">
+        <HugeiconsIcon
+          className="text-muted-foreground"
+          icon={AudioWave01Icon}
+          size={24}
+          strokeWidth={2}
+        />
+      </div>
+      <h3 className="font-semibold text-foreground text-sm">
+        No recent recordings
+      </h3>
+      <p className="mt-1 text-muted-foreground text-xs">
+        Open a recording to see it here.
+      </p>
+    </div>
+  );
+}
+
 export function LibrarySidebar({
   onOpenRecording,
   onOpenSettings,
@@ -41,6 +68,7 @@ export function LibrarySidebar({
   const searchText = useRecordingsStore((s) => s.searchText);
   const setSearchText = useRecordingsStore((s) => s.setSearchText);
   const recordings = useRecordingsStore((s) => s.recordings);
+  const recentRecordingIds = useRecordingsStore((s) => s.recentRecordingIds);
   const createRecording = useRecordingsStore((s) => s.createRecording);
   const selectedRecordingIds = useRecordingsStore(
     (s) => s.selectedRecordingIds
@@ -48,18 +76,37 @@ export function LibrarySidebar({
   const selectRecording = useRecordingsStore((s) => s.selectRecording);
   const selectRecordings = useRecordingsStore((s) => s.selectRecordings);
   const selectionAnchorId = useRef<string | null>(null);
+  const [section, setSection] = useState<LibrarySection>("all");
+
+  const visibleRecordings = useMemo(() => {
+    if (section === "all") {
+      return recordings;
+    }
+
+    const recordingsById = new Map(
+      recordings.map((recording) => [recording.id, recording])
+    );
+    return recentRecordingIds.flatMap((id) => {
+      const recording = recordingsById.get(id);
+      return recording ? [recording] : [];
+    });
+  }, [recentRecordingIds, recordings, section]);
 
   const filteredRecordings = useMemo(() => {
     if (!searchText) {
-      return recordings;
+      return visibleRecordings;
     }
     const lower = searchText.toLowerCase();
-    return recordings.filter(
+    return visibleRecordings.filter(
       (recording) =>
         recording.title.toLowerCase().includes(lower) ||
         recording.fullText.toLowerCase().includes(lower)
     );
-  }, [recordings, searchText]);
+  }, [searchText, visibleRecordings]);
+  const EmptyState =
+    section === "recents" && visibleRecordings.length === 0
+      ? RecentsEmptyState
+      : SidebarEmptyState;
 
   const handleSelectRecording = (
     recordingId: string,
@@ -133,6 +180,31 @@ export function LibrarySidebar({
             )}
           </div>
         )}
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              isActive={section === "all"}
+              onClick={() => setSection("all")}
+              size="sm"
+              tooltip="All Notes"
+            >
+              <HugeiconsIcon icon={Note01Icon} strokeWidth={2} />
+              <span>All Notes</span>
+            </SidebarMenuButton>
+            <SidebarMenuBadge>{recordings.length}</SidebarMenuBadge>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              isActive={section === "recents"}
+              onClick={() => setSection("recents")}
+              size="sm"
+              tooltip="Recents"
+            >
+              <HugeiconsIcon icon={Clock01Icon} strokeWidth={2} />
+              <span>Recents</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
       </SidebarHeader>
 
       <SidebarContent>
@@ -150,7 +222,7 @@ export function LibrarySidebar({
                   </SidebarMenuItem>
                 ))
               ) : (
-                <SidebarEmptyState />
+                <EmptyState />
               )}
             </SidebarMenu>
           </SidebarGroupContent>
