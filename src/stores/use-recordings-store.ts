@@ -1,10 +1,12 @@
 import Database from "@tauri-apps/plugin-sql";
 import { create } from "zustand";
 import {
+  type CreateRecordingInput,
   type CreateTranscriptLineInput,
   type FinalizeTranscriptLineInput,
   RecordingsRepository,
 } from "@/features/library/api/recordings-repository";
+import type { TranscriptionSegment } from "@/features/transcription/types";
 import type { Recording, TranscriptLine } from "@/types/recording";
 import { generateDefaultTitle } from "@/types/recording";
 
@@ -20,6 +22,12 @@ function arraysMatch(left: string[], right: string[]) {
 
 interface RecordingsState {
   createRecording: (partial?: Partial<Recording>) => Promise<Recording>;
+  createRecordingWithSegments: (
+    input: Omit<CreateRecordingInput, "fullText" | "title"> & {
+      title?: string;
+    },
+    segments: TranscriptionSegment[]
+  ) => Promise<Recording>;
   deleteRecording: (id: string) => Promise<void>;
   deleteRecordings: (ids: string[]) => Promise<void>;
   finalizeLine: (line: FinalizeTranscriptLineInput) => Promise<void>;
@@ -193,6 +201,24 @@ export const useRecordingsStore = create<RecordingsState>((set, get) => ({
       isPartial: partial.isPartial ?? false,
       language: partial.language ?? null,
     });
+
+    await get().loadRecordings();
+    get().selectRecording(recording.id);
+    return recording;
+  },
+
+  createRecordingWithSegments: async (input, segments) => {
+    if (!repository) {
+      throw new Error("Database not initialized");
+    }
+
+    const recording = await repository.createRecordingWithSegments(
+      {
+        ...input,
+        title: input.title ?? generateDefaultTitle(),
+      },
+      segments
+    );
 
     await get().loadRecordings();
     get().selectRecording(recording.id);

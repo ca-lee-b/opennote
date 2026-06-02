@@ -5,7 +5,6 @@ import {
   getDownloadedModels,
   getSystemAudioPermission,
   listenToAudioLevels,
-  listenToPartialTranscription,
   loadTranscriptionModel,
   openSystemAudioSettings,
   startTranscriptionRecording,
@@ -15,15 +14,17 @@ import {
 import type {
   AudioLevelEvent,
   AudioSource,
+  TranscriptionResult,
 } from "@/features/transcription/types";
+import { getAppPreferences } from "@/lib/app-preferences";
 import { INITIAL_RECORDING_STATE, type RecordingDialogState } from "../types";
 
 export interface StopRecordingResult {
   audioPath: string | null;
   duration: number;
   modelId: string;
+  segments: TranscriptionResult["segments"];
   startedAt: string | null;
-  transcriptionText: string | null;
 }
 
 export function useActiveRecording() {
@@ -56,29 +57,29 @@ export function useActiveRecording() {
   const startRecording = useCallback(async () => {
     setState((s) => ({ ...s, phase: "loading-model" }));
     try {
-      const unlisten = await listenToAudioLevels((e: AudioLevelEvent) =>
-        setAudioLevel(e.level)
-      );
-      const unlistenPartial = await listenToPartialTranscription((event) => {
-        console.log(
-          `[streaming] ${event.isFinal ? "FINAL" : "partial"} @${event.startTimeSecs.toFixed(1)}s: ${event.text}`
-        );
-      });
-      unlistenRefs.current = [unlisten, unlistenPartial];
-
-      const models = await getDownloadedModels();
-      const model = models.find((m) => m.isDownloaded);
-      if (!model) {
+      const selectedModelId = getAppPreferences().selectedModelId;
+      if (!selectedModelId) {
         throw new Error(
-          "No downloaded model found. Please download a model first."
+          "Select and download a transcription model in Settings before recording."
         );
       }
 
-      await loadTranscriptionModel({
-        arch: model.arch,
-        id: model.id,
-        path: model.path,
-      });
+      const models = await getDownloadedModels();
+      const model = models.find(
+        (candidate) => candidate.id === selectedModelId
+      );
+      if (!model?.isDownloaded) {
+        throw new Error(
+          "The selected transcription model is not downloaded. Choose a downloaded model in Settings."
+        );
+      }
+
+      await loadTranscriptionModel({ id: model.id });
+
+      const unlisten = await listenToAudioLevels((e: AudioLevelEvent) =>
+        setAudioLevel(e.level)
+      );
+      unlistenRefs.current = [unlisten];
       await startTranscriptionRecording(
         audioSourceRef.current,
         saveAudioRef.current
@@ -92,9 +93,10 @@ export function useActiveRecording() {
       }, 100);
       setState((s) => ({ ...s, phase: "recording" }));
     } catch (err) {
+      cleanup();
       setState((s) => ({ ...s, phase: "error", error: String(err) }));
     }
-  }, []);
+  }, [cleanup]);
 
   const stopRecording =
     useCallback(async (): Promise<StopRecordingResult | null> => {
@@ -133,17 +135,24 @@ export function useActiveRecording() {
             return {
               ...data,
               audioPath: null,
-              transcriptionText,
+              segments: transcriptionResult.segments,
             };
           }
 
           return {
             ...data,
             audioPath,
-            transcriptionText,
+            segments: transcriptionResult.segments,
           };
         } catch (err) {
           console.error("Transcription failed:", err);
+          if (!saveAudioRef.current) {
+            try {
+              await deleteAudioFile(data.audioPath);
+            } catch {
+              // deletion best-effort
+            }
+          }
           setState((s) => ({
             ...s,
             phase: "error",
@@ -192,6 +201,10 @@ export function useActiveRecording() {
     await openSystemAudioSettings();
   }, []);
 
+  const reportError = useCallback((error: unknown) => {
+    setState((s) => ({ ...s, phase: "error", error: String(error) }));
+  }, []);
+
   useEffect(() => {
     return cleanup;
   }, [cleanup]);
@@ -200,6 +213,7 @@ export function useActiveRecording() {
     audioLevel,
     reset,
     openComputerAudioSettings,
+    reportError,
     selectAudioSource,
     startRecording,
     state,

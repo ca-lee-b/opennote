@@ -26,10 +26,7 @@ import {
   getDownloadedModels,
   listenToDownloadProgress,
 } from "@/features/transcription/api/transcription-service";
-import type {
-  ModelArch,
-  ModelDownloadInfo,
-} from "@/features/transcription/types";
+import type { ModelDownloadInfo } from "@/features/transcription/types";
 import { getAppPreferences, setSelectedModelId } from "@/lib/app-preferences";
 import { formatBytes } from "@/lib/utils";
 import { DownloadProgress } from "./download-progress";
@@ -41,13 +38,9 @@ interface ModelGroup {
   models: ModelDownloadInfo[];
 }
 
-function isNvidiaArch(arch: ModelArch): boolean {
-  return arch === "parakeet_tdt";
-}
-
 export function SettingsView() {
   const [selectedModelId, setSelectedModelIdState] = useState(
-    () => getAppPreferences().selectedModelId ?? "small_streaming"
+    () => getAppPreferences().selectedModelId
   );
   const [models, setModels] = useState<ModelDownloadInfo[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(true);
@@ -61,16 +54,7 @@ export function SettingsView() {
   const [actionError, setActionError] = useState<string | null>(null);
 
   const modelGroups = useMemo<ModelGroup[]>(() => {
-    const moonshine = models.filter((m) => !isNvidiaArch(m.arch));
-    const nvidia = models.filter((m) => isNvidiaArch(m.arch));
-    const groups: ModelGroup[] = [];
-    if (moonshine.length > 0) {
-      groups.push({ label: "Moonshine", models: moonshine });
-    }
-    if (nvidia.length > 0) {
-      groups.push({ label: "NVIDIA Parakeet", models: nvidia });
-    }
-    return groups;
+    return models.length > 0 ? [{ label: "Whisper", models }] : [];
   }, [models]);
 
   // Fetch models on mount.
@@ -83,6 +67,13 @@ export function SettingsView() {
           return;
         }
         setModels(result);
+        if (
+          selectedModelId &&
+          !result.some((model) => model.id === selectedModelId)
+        ) {
+          setSelectedModelId(null);
+          setSelectedModelIdState(null);
+        }
       })
       .catch((err) => {
         if (cancelled) {
@@ -99,7 +90,7 @@ export function SettingsView() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [selectedModelId]);
 
   // Listen for download progress events.
   useEffect(() => {
@@ -179,9 +170,7 @@ export function SettingsView() {
       const prefs = getAppPreferences();
       if (prefs.selectedModelId === modelId) {
         setSelectedModelId(null);
-        setSelectedModelIdState(
-          getAppPreferences().selectedModelId ?? "small_streaming"
-        );
+        setSelectedModelIdState(getAppPreferences().selectedModelId);
       }
     } catch (err) {
       setActionError(String(err));

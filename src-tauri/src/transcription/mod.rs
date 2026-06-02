@@ -1,7 +1,6 @@
 pub mod audio;
 pub mod models;
-mod moonshine;
-mod parakeet;
+mod whisper;
 mod worker;
 
 use serde::{Deserialize, Serialize};
@@ -14,14 +13,6 @@ use worker::{RecordingData, TranscriptionResult, TranscriptionWorker};
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ModelArch {
-    Small,
-    Medium,
-    ParakeetTdt,
-}
-
-#[derive(Clone, Copy, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
 pub enum AudioSource {
     Microphone,
     ComputerAudio,
@@ -29,7 +20,6 @@ pub enum AudioSource {
 
 pub struct ModelInfoState {
     pub loaded_model_id: Option<String>,
-    pub loaded_model_arch: Option<ModelArch>,
     pub loaded_model_path: Option<String>,
     pub is_recording: bool,
     pub started_at: Option<Instant>,
@@ -46,7 +36,6 @@ pub struct TranscriptionState {
 pub struct TranscriptionStateSnapshot {
     is_model_loaded: bool,
     is_recording: bool,
-    loaded_model_arch: Option<ModelArch>,
     loaded_model_id: Option<String>,
     loaded_model_path: Option<String>,
 }
@@ -54,9 +43,7 @@ pub struct TranscriptionStateSnapshot {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoadModelRequest {
-    arch: ModelArch,
     id: String,
-    path: String,
 }
 
 #[derive(Deserialize)]
@@ -135,7 +122,6 @@ pub fn get_transcription_state(
     Ok(TranscriptionStateSnapshot {
         is_model_loaded: info.loaded_model_id.is_some(),
         is_recording: info.is_recording,
-        loaded_model_arch: info.loaded_model_arch,
         loaded_model_id: info.loaded_model_id.clone(),
         loaded_model_path: info.loaded_model_path.clone(),
     })
@@ -143,16 +129,11 @@ pub fn get_transcription_state(
 
 #[tauri::command]
 pub fn load_transcription_model(
+    app: AppHandle,
     request: LoadModelRequest,
     state: State<'_, TranscriptionState>,
 ) -> Result<TranscriptionStateSnapshot, String> {
-    let model_path = std::path::PathBuf::from(&request.path);
-    if !model_path.exists() {
-        return Err(format!(
-            "Model path does not exist: {}",
-            model_path.display()
-        ));
-    }
+    let model_path = models::resolve_downloaded_model(&app, &request.id)?;
 
     ensure_worker(&state)?;
 
@@ -162,7 +143,7 @@ pub fn load_transcription_model(
             .lock()
             .map_err(|_| "Worker state unavailable".to_string())?;
         if let Some(ref worker) = *worker_guard {
-            worker.load_model(model_path, request.arch)?;
+            worker.load_model(model_path.clone(), request.id.clone())?;
         }
     }
 
@@ -172,8 +153,7 @@ pub fn load_transcription_model(
             .lock()
             .map_err(|_| "State unavailable".to_string())?;
         info.loaded_model_id = Some(request.id);
-        info.loaded_model_arch = Some(request.arch);
-        info.loaded_model_path = Some(request.path);
+        info.loaded_model_path = Some(model_path.display().to_string());
     }
 
     get_transcription_state(state)

@@ -2,44 +2,10 @@ import { useState } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import type { TranscriptLine } from "@/types/recording";
 
-function parseTimeToSeconds(timeStr: string): number {
-  const parts = timeStr.split(":").map(Number);
-  if (parts.length === 3) {
-    return parts[0] * 3600 + parts[1] * 60 + parts[2];
-  }
-  if (parts.length === 2) {
-    return parts[0] * 60 + parts[1];
-  }
-  return 0;
-}
-
 function formatSecondsToTime(totalSeconds: number): string {
   const mins = Math.floor(totalSeconds / 60);
   const secs = Math.floor(totalSeconds % 60);
   return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
-}
-
-function computeElapsedDifferences(lines: TranscriptLine[]): string[] {
-  if (lines.length === 0) {
-    return [];
-  }
-
-  const diffs: string[] = [];
-  let prevSeconds = 0;
-
-  for (let i = 0; i < lines.length; i++) {
-    const currentSeconds = parseTimeToSeconds(lines[i].startTime);
-    if (i === 0) {
-      diffs.push("00:00");
-      prevSeconds = currentSeconds;
-    } else {
-      const diff = currentSeconds - prevSeconds;
-      diffs.push(formatSecondsToTime(Math.max(0, diff)));
-      prevSeconds = currentSeconds;
-    }
-  }
-
-  return diffs;
 }
 
 interface TranscriptLineListProps {
@@ -59,13 +25,11 @@ export function TranscriptLineList({
     );
   }
 
-  const elapsedDifferences = computeElapsedDifferences(lines);
-
   return (
     <div className="flex flex-col">
-      {lines.map((line, index) => (
+      {lines.map((line) => (
         <TranscriptLineEditor
-          elapsed={elapsedDifferences[index]}
+          elapsed={formatSecondsToTime(line.startTimeSecs)}
           key={line.id}
           line={line}
           onUpdateLineText={onUpdateLineText}
@@ -90,7 +54,7 @@ function TranscriptLineEditor({
 
   return (
     <div>
-      <div className="flex items-start gap-4 py-2">
+      <div className="flex items-start gap-4 py-1">
         <span className="w-12 shrink-0 pt-2 text-right font-medium text-muted-foreground text-xs tabular-nums">
           {elapsed}
         </span>

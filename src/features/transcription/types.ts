@@ -1,18 +1,13 @@
-export type ModelArch = "small" | "medium" | "parakeet_tdt";
 export type AudioSource = "microphone" | "computer_audio";
 
 export interface LoadTranscriptionModelRequest {
-  arch: ModelArch;
   id: string;
-  path: string;
 }
 
 export interface TranscriptionStateSnapshot {
   isModelLoaded: boolean;
   isRecording: boolean;
-  loadedModelArch: ModelArch | null;
   loadedModelId: string | null;
-  loadedModelPath: string | null;
 }
 
 export interface RecordingData {
@@ -24,11 +19,11 @@ export interface RecordingData {
 
 export interface TranscriptionResult {
   modelId: string;
+  segments: TranscriptionSegment[];
   text: string;
 }
 
 export interface ModelDownloadInfo {
-  arch: ModelArch;
   blurb: string;
   displayName: string;
   downloadProgress: number;
@@ -36,9 +31,14 @@ export interface ModelDownloadInfo {
   isDownloaded: boolean;
   isDownloading: boolean;
   parameterCount: string;
-  path: string;
   sizeBytes: number;
   wer: string;
+}
+
+export interface TranscriptionSegment {
+  endTimeSecs: number;
+  startTimeSecs: number;
+  text: string;
 }
 
 export type DownloadStatus =
@@ -55,10 +55,4 @@ export interface ModelDownloadProgressEvent {
 
 export interface AudioLevelEvent {
   level: number;
-}
-
-export interface PartialTranscriptionEvent {
-  isFinal: boolean;
-  startTimeSecs: number;
-  text: string;
 }

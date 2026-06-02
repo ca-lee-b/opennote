@@ -12,20 +12,24 @@ export interface Recording {
 
 export interface TranscriptLine {
   duration: number;
+  endTimeSecs: number;
   id: string;
   isFinal: boolean;
   lineId: number;
   recordingId: string;
   sortOrder: number;
   startTime: string;
+  startTimeSecs: number;
   text: string;
 }
 
 export interface TranscriptLineUpdate {
   duration?: number;
+  endTimeSecs?: number;
   kind: "started" | "textChanged" | "completed" | "interrupted";
   lineId: number;
   startTime?: string;
+  startTimeSecs?: number;
   text: string;
 }
 
@@ -43,12 +47,14 @@ export interface RecordingRow {
 
 export interface TranscriptLineRow {
   duration: number;
+  end_time_secs: number;
   id: string;
   is_final: number;
   line_id: number;
   recording_id: string;
   sort_order: number;
   start_time: string;
+  start_time_secs: number;
   text: string;
 }
 
@@ -74,6 +80,8 @@ export function rowToLine(row: TranscriptLineRow): TranscriptLine {
     lineId: row.line_id,
     text: row.text,
     startTime: row.start_time,
+    startTimeSecs: row.start_time_secs,
+    endTimeSecs: row.end_time_secs,
     duration: row.duration,
     sortOrder: row.sort_order,
     isFinal: Boolean(row.is_final),

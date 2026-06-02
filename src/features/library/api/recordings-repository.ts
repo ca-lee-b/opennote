@@ -1,4 +1,6 @@
+import { invoke } from "@tauri-apps/api/core";
 import type Database from "@tauri-apps/plugin-sql";
+import type { TranscriptionSegment } from "@/features/transcription/types";
 import type {
   Recording,
   RecordingRow,
@@ -21,20 +23,24 @@ export interface CreateRecordingInput {
 
 export interface CreateTranscriptLineInput {
   duration?: number;
+  endTimeSecs?: number;
   id?: string;
   isFinal?: boolean;
   lineId: number;
   recordingId: string;
   sortOrder: number;
   startTime?: string;
+  startTimeSecs?: number;
   text: string;
 }
 
 export interface FinalizeTranscriptLineInput {
   duration?: number;
+  endTimeSecs?: number;
   lineId: number;
   recordingId: string;
   startTime?: string;
+  startTimeSecs?: number;
   text: string;
 }
 
@@ -81,13 +87,36 @@ export class RecordingsRepository {
     return recording;
   }
 
+  async createRecordingWithSegments(
+    input: Omit<CreateRecordingInput, "fullText">,
+    segments: TranscriptionSegment[]
+  ): Promise<Recording> {
+    const recording: Recording = {
+      id: input.id ?? crypto.randomUUID(),
+      title: input.title,
+      createdAt: input.createdAt ?? new Date().toISOString(),
+      duration: input.duration ?? 0,
+      audioPath: input.audioPath ?? null,
+      fullText: "",
+      modelId: input.modelId ?? "",
+      isPartial: input.isPartial ?? false,
+      language: input.language ?? null,
+    };
+    const result = await invoke<{ fullText: string }>(
+      "create_recording_with_segments",
+      { request: { ...recording, segments } }
+    );
+
+    return { ...recording, fullText: result.fullText };
+  }
+
   async deleteRecording(id: string): Promise<void> {
     await this.db.execute("DELETE FROM recordings WHERE id = $1", [id]);
   }
 
   async finalizeLine(input: FinalizeTranscriptLineInput): Promise<void> {
     await this.db.execute(
-      `INSERT INTO transcript_lines (id, recording_id, line_id, text, start_time, duration, sort_order, is_final)
+      `INSERT INTO transcript_lines (id, recording_id, line_id, text, start_time, start_time_secs, end_time_secs, duration, sort_order, is_final)
        VALUES (
          $1,
          $2,
@@ -95,12 +124,16 @@ export class RecordingsRepository {
          $4,
          COALESCE($5, datetime('now')),
          COALESCE($6, 0),
+         COALESCE($7, 0),
+         COALESCE($8, 0),
          COALESCE((SELECT MAX(sort_order) + 1 FROM transcript_lines WHERE recording_id = $2), 0),
          1
        )
        ON CONFLICT(recording_id, line_id) DO UPDATE SET
          text = excluded.text,
          start_time = excluded.start_time,
+         start_time_secs = excluded.start_time_secs,
+         end_time_secs = excluded.end_time_secs,
          duration = excluded.duration,
          is_final = 1`,
       [
@@ -109,6 +142,8 @@ export class RecordingsRepository {
         input.lineId,
         input.text,
         input.startTime ?? null,
+        input.startTimeSecs ?? null,
+        input.endTimeSecs ?? null,
         input.duration ?? null,
       ]
     );
@@ -140,31 +175,14 @@ export class RecordingsRepository {
       lineId: input.lineId,
       text: input.text,
       startTime: input.startTime ?? "0:00",
+      startTimeSecs: input.startTimeSecs ?? 0,
+      endTimeSecs: input.endTimeSecs ?? input.duration ?? 0,
       duration: input.duration ?? 0,
       sortOrder: input.sortOrder,
       isFinal: input.isFinal ?? false,
     };
 
-    await this.db.execute(
-      `INSERT INTO transcript_lines (id, recording_id, line_id, text, start_time, duration, sort_order, is_final)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       ON CONFLICT(recording_id, line_id) DO UPDATE SET
-         text = excluded.text,
-         start_time = excluded.start_time,
-         duration = excluded.duration,
-         sort_order = excluded.sort_order,
-         is_final = excluded.is_final`,
-      [
-        line.id,
-        line.recordingId,
-        line.lineId,
-        line.text,
-        line.startTime,
-        line.duration,
-        line.sortOrder,
-        Number(line.isFinal),
-      ]
-    );
+    await this.insertTranscriptLine(line);
 
     await this.rebuildFullText(input.recordingId);
     return line;
@@ -221,5 +239,32 @@ export class RecordingsRepository {
     if (recordingId) {
       await this.rebuildFullText(recordingId);
     }
+  }
+
+  private async insertTranscriptLine(line: TranscriptLine): Promise<void> {
+    await this.db.execute(
+      `INSERT INTO transcript_lines (id, recording_id, line_id, text, start_time, start_time_secs, end_time_secs, duration, sort_order, is_final)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       ON CONFLICT(recording_id, line_id) DO UPDATE SET
+         text = excluded.text,
+         start_time = excluded.start_time,
+         start_time_secs = excluded.start_time_secs,
+         end_time_secs = excluded.end_time_secs,
+         duration = excluded.duration,
+         sort_order = excluded.sort_order,
+         is_final = excluded.is_final`,
+      [
+        line.id,
+        line.recordingId,
+        line.lineId,
+        line.text,
+        line.startTime,
+        line.startTimeSecs,
+        line.endTimeSecs,
+        line.duration,
+        line.sortOrder,
+        Number(line.isFinal),
+      ]
+    );
   }
 }

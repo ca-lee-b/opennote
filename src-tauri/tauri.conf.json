@@ -16,7 +16,8 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "entitlements": "./OpenNote.entitlements"
+      "entitlements": "./OpenNote.entitlements",
+      "minimumSystemVersion": "11.0"
     }
   },
   "productName": "OpenNote",

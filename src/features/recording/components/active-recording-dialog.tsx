@@ -35,7 +35,7 @@ function getDescriptionText(phase: string): string {
   if (phase === "transcribing") {
     return "Transcribing your recording...";
   }
-  return "Start a new voice recording with live transcription.";
+  return "Start a new voice recording. Your transcript will be ready after you stop.";
 }
 
 function getTitleText(phase: string): string {
@@ -58,6 +58,7 @@ export function ActiveRecordingDialog({
   const {
     audioLevel,
     openComputerAudioSettings,
+    reportError,
     reset,
     selectAudioSource,
     startRecording,
@@ -66,8 +67,9 @@ export function ActiveRecordingDialog({
     systemAudioPermission,
     toggleSaveAudio,
   } = useActiveRecording();
-  const createRecording = useRecordingsStore((s) => s.createRecording);
-  const insertLine = useRecordingsStore((s) => s.insertLine);
+  const createRecordingWithSegments = useRecordingsStore(
+    (s) => s.createRecordingWithSegments
+  );
   const [isSaving, setIsSaving] = useState(false);
 
   const handleOpenChange = useCallback(
@@ -101,37 +103,34 @@ export function ActiveRecordingDialog({
     }
 
     try {
-      const recording = await createRecording({
-        audioPath: result.audioPath,
-        createdAt: result.startedAt ?? undefined,
-        duration: result.duration,
-        fullText: result.transcriptionText ?? "",
-        isPartial: false,
-        modelId: result.modelId,
-      });
-      console.log("[handleStop] Created recording:", recording.id);
-
-      if (result.transcriptionText?.trim()) {
-        await insertLine({
+      const recording = await createRecordingWithSegments(
+        {
+          audioPath: result.audioPath,
+          createdAt: result.startedAt ?? undefined,
           duration: result.duration,
-          isFinal: true,
-          lineId: 1,
-          recordingId: recording.id,
-          sortOrder: 0,
-          startTime: "0:00",
-          text: result.transcriptionText,
-        });
-      } else {
-        console.log("[handleStop] No transcription text to insert");
-      }
+          isPartial: false,
+          modelId: result.modelId,
+        },
+        result.segments
+      );
+      console.log("[handleStop] Created recording:", recording.id);
     } catch (err) {
       console.error("Failed to save recording:", err);
+      reportError(err);
+      setIsSaving(false);
+      return;
     }
 
     setIsSaving(false);
     reset();
     onOpenChange(false);
-  }, [stopRecording, createRecording, insertLine, reset, onOpenChange]);
+  }, [
+    stopRecording,
+    createRecordingWithSegments,
+    reportError,
+    reset,
+    onOpenChange,
+  ]);
 
   const isRecording = state.phase === "recording";
   const isLoading = state.phase === "loading-model";

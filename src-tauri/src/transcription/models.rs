@@ -1,15 +1,23 @@
-use crate::transcription::ModelArch;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
-    path::Path,
+    fs::File,
+    io,
+    path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
-    sync::Arc,
-    sync::Mutex,
+    sync::{Arc, Mutex},
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::AsyncWriteExt;
+
+const DOWNLOAD_BASE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
+const LEGACY_MODEL_DIRS: &[&str] = &[
+    "moonshine-small",
+    "moonshine-medium",
+    "parakeet-tdt-0.6b-v3",
+];
 
 #[derive(Default)]
 pub struct DownloadState {
@@ -17,106 +25,76 @@ pub struct DownloadState {
     pub progress: Mutex<HashMap<String, f64>>,
 }
 
+struct Artifact {
+    file_name: &'static str,
+    sha256: &'static str,
+    size_bytes: u64,
+}
+
 struct ModelDescriptor {
     id: &'static str,
-    arch: ModelArch,
     dir_name: &'static str,
     display_name: &'static str,
-    size_bytes: u64,
     wer: &'static str,
     blurb: &'static str,
     parameter_count: &'static str,
-    download_base_url: &'static str,
-    /// Files that must exist locally for the model to be considered downloaded.
-    required_files: &'static [&'static str],
-    /// Mapping from URL filename → local filename. If empty, `required_files`
-    /// filenames are used for both the download URL and the local path.
-    download_files: &'static [(&'static str, &'static str)],
+    model: Artifact,
+    coreml_encoder: Artifact,
+    coreml_dir_name: &'static str,
 }
 
 impl ModelDescriptor {
-    /// Returns the (url_filename, local_filename) pairs for downloading.
-    /// Falls back to using required_files as both url and local names when download_files is empty.
-    fn download_pairs(&self) -> Vec<(&str, &str)> {
-        if self.download_files.is_empty() {
-            self.required_files
-                .iter()
-                .map(|f| (*f, *f))
-                .collect()
-        } else {
-            self.download_files
-                .iter()
-                .map(|(url, local)| (*url, *local))
-                .collect()
-        }
+    fn download_size_bytes(&self) -> u64 {
+        self.model.size_bytes + self.coreml_encoder.size_bytes
+    }
+
+    fn model_path(&self, models_dir: &Path) -> PathBuf {
+        models_dir.join(self.dir_name).join(self.model.file_name)
+    }
+
+    fn artifacts(&self) -> [&Artifact; 2] {
+        [&self.model, &self.coreml_encoder]
     }
 }
 
 const MODEL_REGISTRY: &[ModelDescriptor] = &[
     ModelDescriptor {
-        id: "small_streaming",
-        arch: ModelArch::Small,
-        dir_name: "moonshine-small",
-        display_name: "Small Streaming",
-        size_bytes: 128_974_848,
-        wer: "7.84% WER",
-        blurb: "Balanced accuracy and speed. Perfect for everyday conversations and meetings.",
-        parameter_count: "123M",
-        download_base_url: "https://download.moonshine.ai/model/small-streaming-en/quantized",
-        required_files: &[
-            "adapter.ort",
-            "cross_kv.ort",
-            "decoder_kv.ort",
-            "encoder.ort",
-            "frontend.ort",
-            "streaming_config.json",
-            "tokenizer.bin",
-        ],
-        download_files: &[],
+        id: "whisper_small_en_q5_1",
+        dir_name: "whisper-small-en-q5_1",
+        display_name: "Whisper Small English",
+        wer: "Quantized Q5_1",
+        blurb: "Fast English transcription for everyday recordings.",
+        parameter_count: "466M",
+        model: Artifact {
+            file_name: "ggml-small.en-q5_1.bin",
+            sha256: "bfdff4894dcb76bbf647d56263ea2a96645423f1669176f4844a1bf8e478ad30",
+            size_bytes: 190_098_681,
+        },
+        coreml_encoder: Artifact {
+            file_name: "ggml-small.en-encoder.mlmodelc.zip",
+            sha256: "b2ef1c506378b825b4b4341979a93e1656b5d6c129f17114cfb8fb78aabc2f89",
+            size_bytes: 162_952_446,
+        },
+        coreml_dir_name: "ggml-small.en-encoder.mlmodelc",
     },
     ModelDescriptor {
-        id: "medium_streaming",
-        arch: ModelArch::Medium,
-        dir_name: "moonshine-medium",
-        display_name: "Medium Streaming",
-        size_bytes: 256_901_120,
-        wer: "6.65% WER",
-        blurb: "Best accuracy for long lectures and technical vocabulary. Requires more storage.",
-        parameter_count: "200M",
-        download_base_url: "https://download.moonshine.ai/model/medium-streaming-en/quantized",
-        required_files: &[
-            "adapter.ort",
-            "cross_kv.ort",
-            "decoder_kv.ort",
-            "encoder.ort",
-            "frontend.ort",
-            "streaming_config.json",
-            "tokenizer.bin",
-        ],
-        download_files: &[],
-    },
-    ModelDescriptor {
-        id: "parakeet_tdt_0.6b_v3",
-        arch: ModelArch::ParakeetTdt,
-        dir_name: "parakeet-tdt-0.6b-v3",
-        display_name: "Parakeet TDT 0.6B v3",
-        size_bytes: 933_000_000,
-        wer: "~5% WER",
-        blurb: "NVIDIA's state-of-the-art multilingual model. 25 languages with automatic detection. Best accuracy.",
-        parameter_count: "600M",
-        download_base_url: "https://huggingface.co/nasedkinpv/parakeet-tdt-0.6b-v3-onnx-int8/resolve/main",
-        required_files: &[
-            "encoder-int8.onnx",
-            "encoder-int8.onnx.data",
-            "decoder_joint-model.int8.onnx",
-            "vocab.txt",
-        ],
-        download_files: &[
-            ("encoder-int8.onnx", "encoder-int8.onnx"),
-            ("encoder-int8.onnx.data", "encoder-int8.onnx.data"),
-            ("decoder_joint-int8.onnx", "decoder_joint-model.int8.onnx"),
-            ("vocab.txt", "vocab.txt"),
-        ],
+        id: "whisper_medium_en_q5_0",
+        dir_name: "whisper-medium-en-q5_0",
+        display_name: "Whisper Medium English",
+        wer: "Quantized Q5_0",
+        blurb: "More accurate English transcription for longer or technical recordings.",
+        parameter_count: "769M",
+        model: Artifact {
+            file_name: "ggml-medium.en-q5_0.bin",
+            sha256: "76733e26ad8fe1c7a5bf7531a9d41917b2adc0f20f2e4f5531688a8c6cd88eb0",
+            size_bytes: 539_225_533,
+        },
+        coreml_encoder: Artifact {
+            file_name: "ggml-medium.en-encoder.mlmodelc.zip",
+            sha256: "cdc44fee3c62b5743913e3147ed75f4e8ecfb52dd7a0f0f7387094b406ff0ee6",
+            size_bytes: 566_993_085,
+        },
+        coreml_dir_name: "ggml-medium.en-encoder.mlmodelc",
     },
 ];
 
@@ -124,7 +102,6 @@ const MODEL_REGISTRY: &[ModelDescriptor] = &[
 #[serde(rename_all = "camelCase")]
 pub struct ModelDownloadInfo {
     pub id: String,
-    pub arch: ModelArch,
     pub display_name: String,
     pub size_bytes: u64,
     pub wer: String,
@@ -133,65 +110,6 @@ pub struct ModelDownloadInfo {
     pub is_downloaded: bool,
     pub is_downloading: bool,
     pub download_progress: f64,
-    pub path: String,
-}
-
-#[tauri::command]
-pub fn get_downloaded_models(
-    app: AppHandle,
-    download_state: State<'_, DownloadState>,
-) -> Result<Vec<ModelDownloadInfo>, String> {
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to resolve app data dir: {e}"))?;
-
-    let models_dir = data_dir.join("models");
-
-    let cancellation_tokens = download_state
-        .cancellation_tokens
-        .lock()
-        .map_err(|_| "Download state is unavailable".to_string())?;
-    let progress = download_state
-        .progress
-        .lock()
-        .map_err(|_| "Download state is unavailable".to_string())?;
-
-    Ok(MODEL_REGISTRY
-        .iter()
-        .map(|desc| {
-            let model_path = models_dir.join(desc.dir_name);
-            let is_downloading = cancellation_tokens.contains_key(desc.id);
-            let download_progress = progress.get(desc.id).copied().unwrap_or(0.0);
-            ModelDownloadInfo {
-                id: desc.id.to_string(),
-                arch: desc.arch,
-                display_name: desc.display_name.to_string(),
-                size_bytes: desc.size_bytes,
-                wer: desc.wer.to_string(),
-                blurb: desc.blurb.to_string(),
-                parameter_count: desc.parameter_count.to_string(),
-                is_downloaded: is_model_downloaded(&model_path, desc.required_files),
-                is_downloading,
-                download_progress,
-                path: model_path.display().to_string(),
-            }
-        })
-        .collect())
-}
-
-fn is_model_downloaded(model_dir: &Path, required_files: &[&str]) -> bool {
-    if !model_dir.is_dir() {
-        return false;
-    }
-    for file_name in required_files {
-        let file_path = model_dir.join(file_name);
-        match std::fs::metadata(&file_path) {
-            Ok(metadata) if metadata.len() > 0 => {}
-            _ => return false,
-        }
-    }
-    true
 }
 
 #[derive(Clone, Serialize)]
@@ -223,6 +141,73 @@ pub struct DeleteModelRequest {
     pub model_id: String,
 }
 
+pub fn cleanup_legacy_models(app: &AppHandle) -> Result<(), String> {
+    let models_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Failed to resolve app data dir: {error}"))?
+        .join("models");
+
+    for dir_name in LEGACY_MODEL_DIRS {
+        let path = models_dir.join(dir_name);
+        if path.exists() {
+            std::fs::remove_dir_all(&path).map_err(|error| {
+                format!("Failed to remove legacy model {}: {error}", path.display())
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
+pub fn resolve_downloaded_model(app: &AppHandle, model_id: &str) -> Result<PathBuf, String> {
+    let descriptor = descriptor_for(model_id)?;
+    let models_dir = models_dir(app)?;
+    let model_dir = models_dir.join(descriptor.dir_name);
+    if !is_model_downloaded(&model_dir, descriptor) {
+        return Err(format!(
+            "Selected model is not downloaded. Open Settings and download {}.",
+            descriptor.display_name
+        ));
+    }
+    Ok(descriptor.model_path(&models_dir))
+}
+
+#[tauri::command]
+pub fn get_downloaded_models(
+    app: AppHandle,
+    download_state: State<'_, DownloadState>,
+) -> Result<Vec<ModelDownloadInfo>, String> {
+    cleanup_legacy_models(&app)?;
+    let models_dir = models_dir(&app)?;
+    let cancellation_tokens = download_state
+        .cancellation_tokens
+        .lock()
+        .map_err(|_| "Download state is unavailable".to_string())?;
+    let progress = download_state
+        .progress
+        .lock()
+        .map_err(|_| "Download state is unavailable".to_string())?;
+
+    Ok(MODEL_REGISTRY
+        .iter()
+        .map(|descriptor| {
+            let model_dir = models_dir.join(descriptor.dir_name);
+            ModelDownloadInfo {
+                id: descriptor.id.to_string(),
+                display_name: descriptor.display_name.to_string(),
+                size_bytes: descriptor.download_size_bytes(),
+                wer: descriptor.wer.to_string(),
+                blurb: descriptor.blurb.to_string(),
+                parameter_count: descriptor.parameter_count.to_string(),
+                is_downloaded: is_model_downloaded(&model_dir, descriptor),
+                is_downloading: cancellation_tokens.contains_key(descriptor.id),
+                download_progress: progress.get(descriptor.id).copied().unwrap_or(0.0),
+            }
+        })
+        .collect())
+}
+
 #[tauri::command]
 pub async fn download_model(
     app: AppHandle,
@@ -230,160 +215,33 @@ pub async fn download_model(
     download_state: State<'_, DownloadState>,
 ) -> Result<(), String> {
     let model_id = request.model_id;
+    let descriptor = descriptor_for(&model_id)?;
+    let models_dir = models_dir(&app)?;
+    std::fs::create_dir_all(&models_dir)
+        .map_err(|error| format!("Failed to create models directory: {error}"))?;
+    let staging_dir = models_dir.join(format!(".{}.download", descriptor.dir_name));
+    let model_dir = models_dir.join(descriptor.dir_name);
+    remove_dir_if_exists(&staging_dir)?;
+    std::fs::create_dir_all(&staging_dir)
+        .map_err(|error| format!("Failed to create staging directory: {error}"))?;
+    let cancel_token = register_download(&download_state, &model_id)?;
 
-    let descriptor = MODEL_REGISTRY
-        .iter()
-        .find(|d| d.id == model_id)
-        .ok_or_else(|| format!("Unknown model: {model_id}"))?;
-
-    {
-        let tokens = download_state
-            .cancellation_tokens
-            .lock()
-            .map_err(|_| "Download state is unavailable".to_string())?;
-        if tokens.contains_key(&model_id) {
-            return Err(format!(
-                "Download already in progress for model: {model_id}"
-            ));
-        }
-    }
-
-    let cancel_token = Arc::new(AtomicBool::new(false));
-    download_state
-        .cancellation_tokens
-        .lock()
-        .map_err(|_| "Download state is unavailable".to_string())?
-        .insert(model_id.clone(), cancel_token.clone());
-    download_state
-        .progress
-        .lock()
-        .map_err(|_| "Download state is unavailable".to_string())?
-        .insert(model_id.clone(), 0.0);
-
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to resolve app data dir: {e}"))?;
-    let model_dir = data_dir.join("models").join(descriptor.dir_name);
-
-    if model_dir.exists() {
-        std::fs::remove_dir_all(&model_dir)
-            .map_err(|e| format!("Failed to clean up model directory: {e}"))?;
-    }
-    std::fs::create_dir_all(&model_dir)
-        .map_err(|e| format!("Failed to create model directory: {e}"))?;
-
-    let client = reqwest::Client::new();
-    let download_pairs = descriptor.download_pairs();
-    let total_files = download_pairs.len();
-    let result: Result<(), String> = async {
-        for (file_index, (url_name, local_name)) in download_pairs.iter().enumerate() {
-            if cancel_token.load(Ordering::Relaxed) {
-                return Err("Download cancelled".to_string());
-            }
-
-            let url = format!("{}/{}", descriptor.download_base_url, url_name);
-            let dest_path = model_dir.join(local_name);
-
-            let response = client
-                .get(&url)
-                .send()
-                .await
-                .map_err(|e| format!("Failed to download {local_name}: {e}"))?;
-
-            let status = response.status();
-            if !status.is_success() {
-                return Err(format!(
-                    "Failed to download {local_name}: HTTP {}",
-                    status.as_u16()
-                ));
-            }
-
-            let total_size = response
-                .content_length()
-                .unwrap_or_else(|| descriptor.size_bytes / total_files as u64);
-
-            let mut file = tokio::fs::File::create(&dest_path)
-                .await
-                .map_err(|e| format!("Failed to create file {local_name}: {e}"))?;
-
-            let mut downloaded: u64 = 0;
-            let mut stream = response.bytes_stream();
-            let mut last_reported_progress = -1.0_f64;
-
-            while let Some(chunk_result) = stream.next().await {
-                if cancel_token.load(Ordering::Relaxed) {
-                    return Err("Download cancelled".to_string());
-                }
-
-                let chunk = chunk_result
-                    .map_err(|e| format!("Error reading response for {local_name}: {e}"))?;
-                file.write_all(&chunk)
-                    .await
-                    .map_err(|e| format!("Error writing file {local_name}: {e}"))?;
-
-                downloaded += chunk.len() as u64;
-
-                let file_progress = (downloaded as f64) / (total_size as f64).max(1.0);
-                let overall_progress = (file_index as f64 + file_progress) / total_files as f64;
-
-                if overall_progress - last_reported_progress >= 0.005 || downloaded >= total_size {
-                    last_reported_progress = overall_progress;
-                    download_state
-                        .progress
-                        .lock()
-                        .map_err(|_| "Download state is unavailable".to_string())?
-                        .insert(model_id.clone(), overall_progress);
-                    let _ = app.emit(
-                        "model-download-progress",
-                        ModelDownloadProgressEvent {
-                            model_id: model_id.clone(),
-                            progress: overall_progress,
-                            status: DownloadStatus::Downloading,
-                        },
-                    );
-                }
-            }
-
-            file.flush()
-                .await
-                .map_err(|e| format!("Error flushing file {local_name}: {e}"))?;
-        }
-
-        Ok(())
-    }
+    let result = download_and_activate(
+        &app,
+        &download_state,
+        descriptor,
+        &model_id,
+        &cancel_token,
+        &staging_dir,
+        &model_dir,
+    )
     .await;
 
     if result.is_err() {
-        let _ = std::fs::remove_dir_all(&model_dir);
+        let _ = remove_dir_if_exists(&staging_dir);
     }
-
-    download_state
-        .cancellation_tokens
-        .lock()
-        .map_err(|_| "Download state is unavailable".to_string())?
-        .remove(&model_id);
-    download_state
-        .progress
-        .lock()
-        .map_err(|_| "Download state is unavailable".to_string())?
-        .remove(&model_id);
-
-    let (final_progress, final_status) = match &result {
-        Ok(()) => (1.0, DownloadStatus::Completed),
-        Err(msg) if msg == "Download cancelled" => (0.0, DownloadStatus::Cancelled),
-        Err(_) => (0.0, DownloadStatus::Failed),
-    };
-
-    let _ = app.emit(
-        "model-download-progress",
-        ModelDownloadProgressEvent {
-            model_id: model_id.clone(),
-            progress: final_progress,
-            status: final_status,
-        },
-    );
-
+    clear_download(&download_state, &model_id)?;
+    emit_final_download_status(&app, &model_id, &result);
     result
 }
 
@@ -395,22 +253,19 @@ pub fn delete_model(
     download_state: State<'_, DownloadState>,
 ) -> Result<(), String> {
     let model_id = request.model_id;
-
+    let descriptor = descriptor_for(&model_id)?;
     {
         let model_info = transcription_state
             .model_info
             .lock()
             .map_err(|_| "Transcription state is unavailable".to_string())?;
-        if let Some(ref loaded_id) = model_info.loaded_model_id {
-            if loaded_id == &model_id {
-                return Err(
-                    "Cannot delete model that is currently in use. Please select a different model first."
-                        .to_string(),
-                );
-            }
+        if model_info.loaded_model_id.as_deref() == Some(model_id.as_str()) {
+            return Err(
+                "Cannot delete model that is currently in use. Please select a different model first."
+                    .to_string(),
+            );
         }
     }
-
     {
         let tokens = download_state
             .cancellation_tokens
@@ -420,23 +275,7 @@ pub fn delete_model(
             return Err("Cannot delete model while it is being downloaded.".to_string());
         }
     }
-
-    let descriptor = MODEL_REGISTRY
-        .iter()
-        .find(|d| d.id == model_id)
-        .ok_or_else(|| format!("Unknown model: {model_id}"))?;
-
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to resolve app data dir: {e}"))?;
-    let model_dir = data_dir.join("models").join(descriptor.dir_name);
-
-    if model_dir.exists() {
-        std::fs::remove_dir_all(&model_dir).map_err(|e| format!("Failed to delete model: {e}"))?;
-    }
-
-    Ok(())
+    remove_dir_if_exists(&models_dir(&app)?.join(descriptor.dir_name))
 }
 
 #[tauri::command]
@@ -448,11 +287,327 @@ pub fn cancel_download(
         .cancellation_tokens
         .lock()
         .map_err(|_| "Download state is unavailable".to_string())?;
-
     if let Some(cancel_token) = tokens.get(&model_id) {
         cancel_token.store(true, Ordering::Relaxed);
         Ok(())
     } else {
         Err(format!("No active download for model: {model_id}"))
+    }
+}
+
+async fn download_and_activate(
+    app: &AppHandle,
+    download_state: &State<'_, DownloadState>,
+    descriptor: &ModelDescriptor,
+    model_id: &str,
+    cancel_token: &AtomicBool,
+    staging_dir: &Path,
+    model_dir: &Path,
+) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    let total_size = descriptor.download_size_bytes();
+    let mut completed_bytes = 0_u64;
+
+    for artifact in descriptor.artifacts() {
+        ensure_not_cancelled(cancel_token)?;
+        let path = staging_dir.join(artifact.file_name);
+        download_artifact(
+            app,
+            download_state,
+            &client,
+            model_id,
+            artifact,
+            &path,
+            completed_bytes,
+            total_size,
+            cancel_token,
+        )
+        .await?;
+        completed_bytes += artifact.size_bytes;
+    }
+
+    ensure_not_cancelled(cancel_token)?;
+    extract_coreml_encoder(
+        &staging_dir.join(descriptor.coreml_encoder.file_name),
+        staging_dir,
+        cancel_token,
+    )?;
+    std::fs::remove_file(staging_dir.join(descriptor.coreml_encoder.file_name))
+        .map_err(|error| format!("Failed to remove Core ML archive: {error}"))?;
+    validate_staged_model(staging_dir, descriptor)?;
+    remove_dir_if_exists(model_dir)?;
+    std::fs::rename(staging_dir, model_dir)
+        .map_err(|error| format!("Failed to activate downloaded model: {error}"))?;
+    Ok(())
+}
+
+async fn download_artifact(
+    app: &AppHandle,
+    download_state: &State<'_, DownloadState>,
+    client: &reqwest::Client,
+    model_id: &str,
+    artifact: &Artifact,
+    destination: &Path,
+    completed_bytes: u64,
+    total_size: u64,
+    cancel_token: &AtomicBool,
+) -> Result<(), String> {
+    let url = format!("{DOWNLOAD_BASE_URL}/{}", artifact.file_name);
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|error| format!("Failed to download {}: {error}", artifact.file_name))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Failed to download {}: HTTP {}",
+            artifact.file_name,
+            response.status()
+        ));
+    }
+
+    let mut file = tokio::fs::File::create(destination)
+        .await
+        .map_err(|error| format!("Failed to create {}: {error}", artifact.file_name))?;
+    let mut hasher = Sha256::new();
+    let mut downloaded = 0_u64;
+    let mut stream = response.bytes_stream();
+    let mut last_reported = -1.0_f64;
+
+    while let Some(chunk) = stream.next().await {
+        ensure_not_cancelled(cancel_token)?;
+        let chunk =
+            chunk.map_err(|error| format!("Failed to read {}: {error}", artifact.file_name))?;
+        file.write_all(&chunk)
+            .await
+            .map_err(|error| format!("Failed to write {}: {error}", artifact.file_name))?;
+        hasher.update(&chunk);
+        downloaded += chunk.len() as u64;
+        let progress = (completed_bytes + downloaded) as f64 / total_size as f64;
+        if progress - last_reported >= 0.005 || downloaded >= artifact.size_bytes {
+            last_reported = progress;
+            update_progress(app, download_state, model_id, progress)?;
+        }
+    }
+    file.flush()
+        .await
+        .map_err(|error| format!("Failed to flush {}: {error}", artifact.file_name))?;
+
+    if downloaded != artifact.size_bytes {
+        return Err(format!(
+            "Downloaded {} bytes for {}, expected {}",
+            downloaded, artifact.file_name, artifact.size_bytes
+        ));
+    }
+    let digest = format!("{:x}", hasher.finalize());
+    if digest != artifact.sha256 {
+        return Err(format!(
+            "Checksum verification failed for {}",
+            artifact.file_name
+        ));
+    }
+    Ok(())
+}
+
+fn extract_coreml_encoder(
+    archive_path: &Path,
+    destination: &Path,
+    cancel_token: &AtomicBool,
+) -> Result<(), String> {
+    let file = File::open(archive_path)
+        .map_err(|error| format!("Failed to open Core ML archive: {error}"))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|error| format!("Invalid Core ML archive: {error}"))?;
+    for index in 0..archive.len() {
+        ensure_not_cancelled(cancel_token)?;
+        let mut entry = archive
+            .by_index(index)
+            .map_err(|error| format!("Failed to read Core ML archive: {error}"))?;
+        let relative_path = entry
+            .enclosed_name()
+            .ok_or_else(|| "Core ML archive contains an unsafe path".to_string())?;
+        let output_path = destination.join(relative_path);
+        if entry.is_dir() {
+            std::fs::create_dir_all(&output_path)
+                .map_err(|error| format!("Failed to create Core ML directory: {error}"))?;
+            continue;
+        }
+        if let Some(parent) = output_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("Failed to create Core ML directory: {error}"))?;
+        }
+        let mut output = File::create(&output_path)
+            .map_err(|error| format!("Failed to extract Core ML file: {error}"))?;
+        io::copy(&mut entry, &mut output)
+            .map_err(|error| format!("Failed to extract Core ML file: {error}"))?;
+    }
+    Ok(())
+}
+
+fn validate_staged_model(model_dir: &Path, descriptor: &ModelDescriptor) -> Result<(), String> {
+    let model_path = model_dir.join(descriptor.model.file_name);
+    if !is_non_empty_file(&model_path) {
+        return Err(format!(
+            "Downloaded model is missing {}",
+            descriptor.model.file_name
+        ));
+    }
+    let coreml_dir = model_dir.join(descriptor.coreml_dir_name);
+    if !coreml_dir.is_dir() || !directory_contains_file(&coreml_dir) {
+        return Err(format!(
+            "Downloaded model is missing {}",
+            descriptor.coreml_dir_name
+        ));
+    }
+    Ok(())
+}
+
+fn directory_contains_file(path: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return false;
+    };
+    entries.filter_map(Result::ok).any(|entry| {
+        let path = entry.path();
+        path.is_file() || (path.is_dir() && directory_contains_file(&path))
+    })
+}
+
+fn is_model_downloaded(model_dir: &Path, descriptor: &ModelDescriptor) -> bool {
+    validate_staged_model(model_dir, descriptor).is_ok()
+}
+
+fn is_non_empty_file(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0)
+}
+
+fn descriptor_for(model_id: &str) -> Result<&'static ModelDescriptor, String> {
+    MODEL_REGISTRY
+        .iter()
+        .find(|descriptor| descriptor.id == model_id)
+        .ok_or_else(|| format!("Unknown model: {model_id}"))
+}
+
+fn models_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|path| path.join("models"))
+        .map_err(|error| format!("Failed to resolve app data dir: {error}"))
+}
+
+fn remove_dir_if_exists(path: &Path) -> Result<(), String> {
+    if path.exists() {
+        std::fs::remove_dir_all(path)
+            .map_err(|error| format!("Failed to remove {}: {error}", path.display()))?;
+    }
+    Ok(())
+}
+
+fn ensure_not_cancelled(cancel_token: &AtomicBool) -> Result<(), String> {
+    if cancel_token.load(Ordering::Relaxed) {
+        Err("Download cancelled".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+fn register_download(
+    download_state: &State<'_, DownloadState>,
+    model_id: &str,
+) -> Result<Arc<AtomicBool>, String> {
+    let mut tokens = download_state
+        .cancellation_tokens
+        .lock()
+        .map_err(|_| "Download state is unavailable".to_string())?;
+    if tokens.contains_key(model_id) {
+        return Err(format!(
+            "Download already in progress for model: {model_id}"
+        ));
+    }
+    let cancel_token = Arc::new(AtomicBool::new(false));
+    tokens.insert(model_id.to_string(), Arc::clone(&cancel_token));
+    download_state
+        .progress
+        .lock()
+        .map_err(|_| "Download state is unavailable".to_string())?
+        .insert(model_id.to_string(), 0.0);
+    Ok(cancel_token)
+}
+
+fn clear_download(download_state: &State<'_, DownloadState>, model_id: &str) -> Result<(), String> {
+    download_state
+        .cancellation_tokens
+        .lock()
+        .map_err(|_| "Download state is unavailable".to_string())?
+        .remove(model_id);
+    download_state
+        .progress
+        .lock()
+        .map_err(|_| "Download state is unavailable".to_string())?
+        .remove(model_id);
+    Ok(())
+}
+
+fn update_progress(
+    app: &AppHandle,
+    download_state: &State<'_, DownloadState>,
+    model_id: &str,
+    progress: f64,
+) -> Result<(), String> {
+    download_state
+        .progress
+        .lock()
+        .map_err(|_| "Download state is unavailable".to_string())?
+        .insert(model_id.to_string(), progress);
+    let _ = app.emit(
+        "model-download-progress",
+        ModelDownloadProgressEvent {
+            model_id: model_id.to_string(),
+            progress,
+            status: DownloadStatus::Downloading,
+        },
+    );
+    Ok(())
+}
+
+fn emit_final_download_status(app: &AppHandle, model_id: &str, result: &Result<(), String>) {
+    let (progress, status) = match result {
+        Ok(()) => (1.0, DownloadStatus::Completed),
+        Err(message) if message == "Download cancelled" => (0.0, DownloadStatus::Cancelled),
+        Err(_) => (0.0, DownloadStatus::Failed),
+    };
+    let _ = app.emit(
+        "model-download-progress",
+        ModelDownloadProgressEvent {
+            model_id: model_id.to_string(),
+            progress,
+            status,
+        },
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{descriptor_for, MODEL_REGISTRY};
+
+    #[test]
+    fn registry_contains_supported_whisper_models() {
+        assert_eq!(MODEL_REGISTRY.len(), 2);
+        assert!(descriptor_for("whisper_small_en_q5_1").is_ok());
+        assert!(descriptor_for("whisper_medium_en_q5_0").is_ok());
+    }
+
+    #[test]
+    fn registry_rejects_legacy_model_id() {
+        assert!(descriptor_for("small_streaming").is_err());
+    }
+
+    #[test]
+    fn artifacts_have_sha256_checksums_and_sizes() {
+        for descriptor in MODEL_REGISTRY {
+            for artifact in descriptor.artifacts() {
+                assert_eq!(artifact.sha256.len(), 64);
+                assert!(artifact.size_bytes > 0);
+            }
+        }
     }
 }

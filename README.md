@@ -2,7 +2,7 @@
 
 Privacy-first, on-device audio transcription — powered by local AI models running entirely on your machine.
 
-OpenNote is a desktop app that records audio from your microphone or system audio and transcribes it in real time using locally-run neural models. No cloud APIs, no data leaving your device. Everything stays on your machine.
+OpenNote is an Apple Silicon desktop app that records audio from your microphone or system audio and transcribes it locally after you stop recording. No cloud APIs, no audio leaving your device. Everything stays on your machine.
 
 Built with [Tauri v2](https://v2.tauri.app/) (Rust backend), [React 19](https://react.dev/), [TypeScript](https://typescriptlang.org/), [Tailwind CSS v4](https://tailwindcss.com/), and [shadcn/ui](https://ui.shadcn.com/).
 
@@ -10,7 +10,7 @@ Built with [Tauri v2](https://v2.tauri.app/) (Rust backend), [React 19](https://
 
 ## Features
 
-- **Local transcription** — Audio is transcribed by neural models (Moonshine, Parakeet TDT) running directly on your device. No server round-trips.
+- **Local transcription** — Audio is transcribed by Whisper running directly on your Apple Silicon Mac. No server round-trips.
 - **Microphone & system audio** — Record from your microphone or capture computer audio (macOS 13+ with Screen Recording permission).
 - **Model management** — Download, switch, and delete transcription models from an in-app settings panel. Models are stored locally.
 - **Transcript editing** — View, search, and edit individual transcript lines. Rename recordings, mark partial transcriptions.
@@ -28,7 +28,7 @@ Built with [Tauri v2](https://v2.tauri.app/) (Rust backend), [React 19](https://
 | State | Zustand |
 | Routing | react-router v7 |
 | Database | SQLite via `tauri-plugin-sql` |
-| Transcription | `transcribe-rs` (ONNX), `parakeet-rs` |
+| Transcription | `transcribe-rs`, embedded `whisper.cpp`, Metal, Core ML |
 | Audio | `cpal`, `hound` (WAV capture & encoding) |
 | Validation | Zod |
 | Linting | Biome via ultracite, Husky + lint-staged |
@@ -39,7 +39,7 @@ Built with [Tauri v2](https://v2.tauri.app/) (Rust backend), [React 19](https://
 
 - [Tauri v2 prerequisites](https://v2.tauri.app/start/prerequisites/) (Rust toolchain, platform SDKs)
 - [Bun](https://bun.sh) (or npm/pnpm/yarn)
-- macOS (system audio recording requires macOS 13+)
+- Apple Silicon Mac (system audio recording requires macOS 13+)
 
 ### Install
 
@@ -91,8 +91,7 @@ opennote-rs/
 │   │       ├── mod.rs            # Tauri commands, state, permissions
 │   │       ├── audio.rs          # Microphone & system audio capture (cpal)
 │   │       ├── worker.rs         # Transcription worker thread
-│   │       ├── moonshine.rs      # Moonshine ONNX model integration
-│   │       ├── parakeet.rs       # Parakeet TDT model integration
+│   │       ├── whisper.rs        # Embedded Whisper model integration
 │   │       └── models.rs         # Model download & management
 │   ├── Cargo.toml
 │   └── tauri.conf.json
@@ -106,7 +105,7 @@ The app follows [bulletproof-react](https://github.com/alan2207/bulletproof-reac
 **Data flow:**
 
 1. **Recording** — The Rust backend captures audio via `cpal`, writes WAV files, and streams audio-level events to the frontend.
-2. **Transcription** — A background worker loads an ONNX-based model (Moonshine or Parakeet TDT) and transcribes audio in real time, emitting line-level updates to the frontend.
+2. **Transcription** — A background worker loads a downloaded Whisper model and transcribes the completed WAV locally. Metal and Core ML acceleration are enabled on Apple Silicon. The first Core ML inference may take longer while macOS compiles the encoder.
 3. **Storage** — Recordings and transcript lines are persisted in SQLite via `tauri-plugin-sql` with automatic schema migrations.
 4. **State** — The frontend uses Zustand stores that wrap the SQL repository, keeping the UI in sync with the database.
 

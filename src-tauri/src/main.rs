@@ -2,6 +2,7 @@
 
 use tauri_plugin_sql::{Migration, MigrationKind};
 
+mod recordings;
 mod transcription;
 
 fn main() {
@@ -94,13 +95,19 @@ fn main() {
             sql: "DROP TABLE IF EXISTS recording_sessions;",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 6,
+            description: "add numeric transcript segment timestamps",
+            sql: "ALTER TABLE transcript_lines ADD COLUMN start_time_secs REAL NOT NULL DEFAULT 0;
+            ALTER TABLE transcript_lines ADD COLUMN end_time_secs REAL NOT NULL DEFAULT 0;",
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
         .manage(transcription::TranscriptionState {
             model_info: std::sync::Mutex::new(transcription::ModelInfoState {
                 loaded_model_id: None,
-                loaded_model_arch: None,
                 loaded_model_path: None,
                 is_recording: false,
                 started_at: None,
@@ -109,6 +116,10 @@ fn main() {
             worker: std::sync::Mutex::new(None),
         })
         .manage(transcription::DownloadState::default())
+        .setup(|app| {
+            transcription::models::cleanup_legacy_models(app.handle())?;
+            Ok(())
+        })
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations("sqlite:opennote.db", migrations)
@@ -132,6 +143,7 @@ fn main() {
             transcription::models::download_model,
             transcription::models::delete_model,
             transcription::models::cancel_download,
+            recordings::create_recording_with_segments,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
