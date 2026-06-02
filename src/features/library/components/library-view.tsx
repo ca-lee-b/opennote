@@ -25,6 +25,7 @@ import { DetailPlaceholder } from "@/features/library/components/empty-states";
 import { LibrarySidebar } from "@/features/library/components/library-sidebar";
 import { RecordingActionDialogs } from "@/features/library/components/recording-action-dialogs";
 import { RecordingDetailView } from "@/features/library/components/recording-detail-view";
+import { RecordingDetailsSidebar } from "@/features/library/components/recording-details-sidebar";
 import { RecordingExportMenuItems } from "@/features/library/components/recording-export-menu-items";
 import { RecordingMoreActionsMenuItems } from "@/features/library/components/recording-more-actions-menu-items";
 import { ActiveRecordingDialog } from "@/features/recording/components/active-recording-dialog";
@@ -124,10 +125,15 @@ export function LibraryView() {
           {/* Detail pane */}
           <div className="min-h-0 flex-1 overflow-hidden">
             {selectedRecording ? (
-              <RecordingDetailView
-                key={selectedRecording.id}
-                recording={selectedRecording}
-              />
+              <div className="flex h-full min-h-0">
+                <div className="min-w-0 flex-1">
+                  <RecordingDetailView
+                    key={selectedRecording.id}
+                    recording={selectedRecording}
+                  />
+                </div>
+                <RecordingDetailsSidebar recording={selectedRecording} />
+              </div>
             ) : (
               <DetailPlaceholder />
             )}

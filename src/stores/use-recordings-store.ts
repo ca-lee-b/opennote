@@ -7,6 +7,10 @@ import {
   RecordingsRepository,
 } from "@/features/library/api/recordings-repository";
 import type { TranscriptionSegment } from "@/features/transcription/types";
+import {
+  markRecordingAsRecent,
+  reconcileRecentRecordingIds,
+} from "@/lib/recent-recordings";
 import type { Recording, TranscriptLine } from "@/types/recording";
 import { generateDefaultTitle } from "@/types/recording";
 
@@ -37,6 +41,7 @@ interface RecordingsState {
   linesByRecordingId: Record<string, TranscriptLine[]>;
   loadRecordings: (options?: { selectDefault?: boolean }) => Promise<void>;
   loadRecordingWithLines: (id: string) => Promise<void>;
+  recentRecordingIds: string[];
   recordings: Recording[];
   renameRecording: (id: string, title: string) => Promise<void>;
   searchText: string;
@@ -102,6 +107,7 @@ function reconcileRecordingSelection({
 
 export const useRecordingsStore = create<RecordingsState>((set, get) => ({
   recordings: [],
+  recentRecordingIds: [],
   linesByRecordingId: {},
   selectedRecordingId: null,
   selectedRecordingIds: [],
@@ -127,7 +133,10 @@ export const useRecordingsStore = create<RecordingsState>((set, get) => ({
 
     try {
       const recordings = await repository.listRecordings();
-      set({ recordings, isLoading: false });
+      const recentRecordingIds = reconcileRecentRecordingIds(
+        recordings.map((recording) => recording.id)
+      );
+      set({ recordings, recentRecordingIds, isLoading: false });
 
       const { selectedRecordingId, selectedRecordingIds } = get();
       reconcileRecordingSelection({
@@ -147,6 +156,9 @@ export const useRecordingsStore = create<RecordingsState>((set, get) => ({
 
   selectRecording: (id) => {
     set({
+      recentRecordingIds: id
+        ? markRecordingAsRecent(id)
+        : get().recentRecordingIds,
       selectedRecordingId: id,
       selectedRecordingIds: id ? [id] : [],
     });
@@ -167,6 +179,9 @@ export const useRecordingsStore = create<RecordingsState>((set, get) => ({
         : (selectedRecordingIds[0] ?? null);
 
     set({
+      recentRecordingIds: selectedRecordingId
+        ? markRecordingAsRecent(selectedRecordingId)
+        : get().recentRecordingIds,
       selectedRecordingId,
       selectedRecordingIds,
     });
