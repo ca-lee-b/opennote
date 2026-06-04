@@ -57,7 +57,8 @@ export function RecordingSidebarRow({
         <ContextMenuTrigger asChild>
           <SidebarMenuButton
             className={cn(
-              "min-h-16 rounded-md border border-transparent px-3 py-2.5 transition-colors",
+              "rounded-md border border-transparent px-3 py-2.5 transition-colors",
+              !isCollapsed && "min-h-16",
               isSelected
                 ? "bg-background text-foreground ring-1 ring-border"
                 : "hover:bg-background/70"

@@ -44,6 +44,37 @@ export interface FinalizeTranscriptLineInput {
   text: string;
 }
 
+function normalizeRecordingWrite(input: CreateRecordingInput): Recording {
+  return {
+    id: input.id ?? crypto.randomUUID(),
+    title: input.title,
+    createdAt: input.createdAt ?? new Date().toISOString(),
+    duration: input.duration ?? 0,
+    audioPath: input.audioPath ?? null,
+    fullText: input.fullText ?? "",
+    modelId: input.modelId ?? "",
+    isPartial: input.isPartial ?? false,
+    language: input.language ?? null,
+  };
+}
+
+function normalizeTranscriptLineWrite(
+  input: CreateTranscriptLineInput
+): TranscriptLine {
+  return {
+    id: input.id ?? crypto.randomUUID(),
+    recordingId: input.recordingId,
+    lineId: input.lineId,
+    text: input.text,
+    startTime: input.startTime ?? "0:00",
+    startTimeSecs: input.startTimeSecs ?? 0,
+    endTimeSecs: input.endTimeSecs ?? input.duration ?? 0,
+    duration: input.duration ?? 0,
+    sortOrder: input.sortOrder,
+    isFinal: input.isFinal ?? false,
+  };
+}
+
 export class RecordingsRepository {
   private readonly db: Database;
 
@@ -56,17 +87,7 @@ export class RecordingsRepository {
   }
 
   async createRecording(input: CreateRecordingInput): Promise<Recording> {
-    const recording: Recording = {
-      id: input.id ?? crypto.randomUUID(),
-      title: input.title,
-      createdAt: input.createdAt ?? new Date().toISOString(),
-      duration: input.duration ?? 0,
-      audioPath: input.audioPath ?? null,
-      fullText: input.fullText ?? "",
-      modelId: input.modelId ?? "",
-      isPartial: input.isPartial ?? false,
-      language: input.language ?? null,
-    };
+    const recording = normalizeRecordingWrite(input);
 
     await this.db.execute(
       `INSERT INTO recordings (id, title, created_at, duration, model_id, is_partial, audio_path, language, full_text)
@@ -91,17 +112,7 @@ export class RecordingsRepository {
     input: Omit<CreateRecordingInput, "fullText">,
     segments: TranscriptionSegment[]
   ): Promise<Recording> {
-    const recording: Recording = {
-      id: input.id ?? crypto.randomUUID(),
-      title: input.title,
-      createdAt: input.createdAt ?? new Date().toISOString(),
-      duration: input.duration ?? 0,
-      audioPath: input.audioPath ?? null,
-      fullText: "",
-      modelId: input.modelId ?? "",
-      isPartial: input.isPartial ?? false,
-      language: input.language ?? null,
-    };
+    const recording = normalizeRecordingWrite(input);
     const result = await invoke<{ fullText: string }>(
       "create_recording_with_segments",
       { request: { ...recording, segments } }
@@ -169,18 +180,7 @@ export class RecordingsRepository {
   }
 
   async insertLine(input: CreateTranscriptLineInput): Promise<TranscriptLine> {
-    const line: TranscriptLine = {
-      id: input.id ?? crypto.randomUUID(),
-      recordingId: input.recordingId,
-      lineId: input.lineId,
-      text: input.text,
-      startTime: input.startTime ?? "0:00",
-      startTimeSecs: input.startTimeSecs ?? 0,
-      endTimeSecs: input.endTimeSecs ?? input.duration ?? 0,
-      duration: input.duration ?? 0,
-      sortOrder: input.sortOrder,
-      isFinal: input.isFinal ?? false,
-    };
+    const line = normalizeTranscriptLineWrite(input);
 
     await this.insertTranscriptLine(line);
 

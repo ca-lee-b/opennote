@@ -84,3 +84,17 @@ opennote-rs/
 - **Error handling:** `react-error-boundary` at the provider level, with feature-scoped error pages in `features/errors/`
 - **Styling:** Tailwind CSS v4 (Vite plugin), shadcn/ui new-york style, CSS variables for theming
 - **Pre-commit:** Husky runs `lint-staged` → `ultracite fix` on staged files
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in GitHub for `ca-lee-b/opennote`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The default five-label triage vocabulary is used as-is. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repo: root `CONTEXT.md` plus `docs/adr/` when present. See `docs/agents/domain.md`.

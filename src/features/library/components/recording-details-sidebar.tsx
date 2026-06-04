@@ -1,7 +1,5 @@
 import { format } from "date-fns";
-import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import { formatDuration, type Recording } from "@/types/recording";
 
 interface RecordingDetailsSidebarProps {
@@ -38,12 +36,8 @@ export function RecordingDetailsSidebar({
       <ScrollArea className="h-full">
         <div className="flex flex-col gap-5 p-5">
           <div>
-            <p className="font-semibold text-sm">Recording Details</p>
-            <p className="mt-1 text-muted-foreground text-xs">
-              Metadata for this transcription
-            </p>
+            <p className="font-semibold text-sm">Metadata</p>
           </div>
-          <Separator />
           <dl className="flex flex-col gap-4">
             <DetailRow label="Title" value={recording.title} />
             <DetailRow
@@ -59,20 +53,6 @@ export function RecordingDetailsSidebar({
               label="Characters"
               value={recording.fullText.length.toLocaleString()}
             />
-            <DetailRow
-              label="Language"
-              value={recording.language || "Not specified"}
-            />
-          </dl>
-          <Separator />
-          <dl className="flex flex-col gap-4">
-            <DetailRow label="Stored on" value="This Device" />
-            <div className="flex flex-col gap-1">
-              <dt className="text-muted-foreground text-xs">Privacy</dt>
-              <dd>
-                <Badge variant="secondary">Private by default</Badge>
-              </dd>
-            </div>
             {recording.audioPath && (
               <DetailRow
                 label="Audio file"

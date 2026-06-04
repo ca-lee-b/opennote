@@ -1,7 +1,8 @@
-import { AudioWave01Icon } from "@hugeicons/core-free-icons";
+import { AudioWave01Icon, ClipboardCopyIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { format } from "date-fns";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useRecordingsStore } from "@/stores/use-recordings-store";
 import {
@@ -23,13 +24,33 @@ export function RecordingDetailView({ recording }: RecordingDetailViewProps) {
     (s) => s.linesByRecordingId[recording.id] ?? EMPTY_LINES
   );
 
+  const handleCopyTranscript = async () => {
+    const text = lines.map((line) => line.text).join("\n");
+    if (text) {
+      await navigator.clipboard.writeText(text);
+    }
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
       {/* Recording Header */}
       <div className="shrink-0 space-y-3 border-border/70 border-b px-8 py-6 sm:px-10 sm:py-7">
-        <h1 className="font-heading font-semibold text-2xl tracking-tight">
-          {recording.title}
-        </h1>
+        <div className="flex items-center justify-between gap-4">
+          <h1 className="font-heading font-semibold text-2xl tracking-tight">
+            {recording.title}
+          </h1>
+          {lines.length > 0 && (
+            <Button
+              onClick={handleCopyTranscript}
+              size="icon"
+              title="Copy transcription"
+              variant="ghost"
+            >
+              <HugeiconsIcon icon={ClipboardCopyIcon} strokeWidth={2} />
+              <span className="sr-only">Copy transcription</span>
+            </Button>
+          )}
+        </div>
         <div className="flex flex-wrap items-center gap-2 text-muted-foreground text-sm">
           <span>{format(new Date(recording.createdAt), "MMM d, yyyy")}</span>
           <span>•</span>

@@ -8,6 +8,7 @@ import {
   Settings02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { AnimatePresence, motion } from "motion/react";
 import { type MouseEvent, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,6 +37,12 @@ interface LibrarySidebarProps {
 }
 
 type LibrarySection = "all" | "recents";
+
+const LIST_ITEM_TRANSITION = {
+  duration: 0.2,
+  ease: [0.22, 1, 0.36, 1],
+  type: "tween",
+} as const;
 
 function RecentsEmptyState() {
   return (
@@ -147,7 +154,9 @@ export function LibrarySidebar({
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader className={cn("gap-3", isCollapsed ? "p-2" : "mt-6 p-3")}>
+      <SidebarHeader
+        className={cn("gap-3", isCollapsed ? "px-2 pt-8 pb-2" : "mt-6 p-3")}
+      >
         <SidebarMenuButton
           className="rounded-md font-medium"
           onClick={onOpenRecording ?? (() => createRecording())}
@@ -211,19 +220,28 @@ export function LibrarySidebar({
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {filteredRecordings.length > 0 ? (
-                filteredRecordings.map((recording) => (
-                  <SidebarMenuItem key={recording.id}>
+              {filteredRecordings.length > 0 ? null : <EmptyState />}
+              <AnimatePresence initial={false}>
+                {filteredRecordings.map((recording) => (
+                  <motion.li
+                    animate={{ opacity: 1, y: 0 }}
+                    className="group/menu-item relative"
+                    data-sidebar="menu-item"
+                    data-slot="sidebar-menu-item"
+                    exit={{ opacity: 0, y: -4 }}
+                    initial={{ opacity: 0, y: 4 }}
+                    key={recording.id}
+                    layout
+                    transition={LIST_ITEM_TRANSITION}
+                  >
                     <RecordingSidebarRow
                       onOpenContextMenu={handleOpenRecordingContextMenu}
                       onSelect={handleSelectRecording}
                       recording={recording}
                     />
-                  </SidebarMenuItem>
-                ))
-              ) : (
-                <EmptyState />
-              )}
+                  </motion.li>
+                ))}
+              </AnimatePresence>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

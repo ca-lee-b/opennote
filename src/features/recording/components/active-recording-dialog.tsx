@@ -73,7 +73,7 @@ export function ActiveRecordingDialog({
   const [isSaving, setIsSaving] = useState(false);
 
   const handleOpenChange = useCallback(
-    (nextOpen: boolean) => {
+    async (nextOpen: boolean) => {
       if (
         !nextOpen &&
         (state.phase === "recording" || state.phase === "transcribing")
@@ -81,7 +81,7 @@ export function ActiveRecordingDialog({
         return;
       }
       if (!nextOpen) {
-        reset();
+        await reset();
       }
       onOpenChange(nextOpen);
     },
@@ -122,7 +122,7 @@ export function ActiveRecordingDialog({
     }
 
     setIsSaving(false);
-    reset();
+    await reset();
     onOpenChange(false);
   }, [
     stopRecording,

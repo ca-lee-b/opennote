@@ -1,31 +1,14 @@
-import type { UnlistenFn } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  deleteAudioFile,
-  getDownloadedModels,
   getSystemAudioPermission,
-  listenToAudioLevels,
-  loadTranscriptionModel,
   openSystemAudioSettings,
-  startTranscriptionRecording,
-  stopTranscriptionRecording,
-  transcribeRecording,
 } from "@/features/transcription/api/transcription-service";
-import type {
-  AudioLevelEvent,
-  AudioSource,
-  TranscriptionResult,
-} from "@/features/transcription/types";
-import { getAppPreferences } from "@/lib/app-preferences";
+import type { AudioSource } from "@/features/transcription/types";
+import type { StopRecordingResult } from "../api/capture-session";
+import { CaptureSession } from "../api/capture-session";
 import { INITIAL_RECORDING_STATE, type RecordingDialogState } from "../types";
 
-export interface StopRecordingResult {
-  audioPath: string | null;
-  duration: number;
-  modelId: string;
-  segments: TranscriptionResult["segments"];
-  startedAt: string | null;
-}
+export type { StopRecordingResult } from "../api/capture-session";
 
 export function useActiveRecording() {
   const [state, setState] = useState<RecordingDialogState>(
@@ -35,167 +18,83 @@ export function useActiveRecording() {
   const [systemAudioPermission, setSystemAudioPermission] = useState<
     boolean | null
   >(null);
-  const unlistenRefs = useRef<UnlistenFn[]>([]);
-  const durationRef = useRef<ReturnType<typeof setInterval> | undefined>(
-    undefined
-  );
+  const sessionRef = useRef<CaptureSession | null>(null);
 
-  const saveAudioRef = useRef(true);
-  const audioSourceRef = useRef<AudioSource>("microphone");
+  if (!sessionRef.current) {
+    sessionRef.current = new CaptureSession({
+      audioSource: INITIAL_RECORDING_STATE.audioSource,
+      saveAudio: INITIAL_RECORDING_STATE.saveAudio,
+      onAudioLevel: setAudioLevel,
+      onDurationChange: (duration) => {
+        setState((s) => ({ ...s, duration }));
+      },
+    });
+  }
+
+  const getSession = useCallback(() => {
+    if (!sessionRef.current) {
+      throw new Error("Capture session is unavailable");
+    }
+    return sessionRef.current;
+  }, []);
 
   const cleanup = useCallback(() => {
-    for (const fn of unlistenRefs.current) {
-      fn();
-    }
-    unlistenRefs.current = [];
-    if (durationRef.current !== undefined) {
-      clearInterval(durationRef.current);
-      durationRef.current = undefined;
-    }
-  }, []);
+    getSession().cleanup();
+  }, [getSession]);
 
   const startRecording = useCallback(async () => {
     setState((s) => ({ ...s, phase: "loading-model" }));
     try {
-      const selectedModelId = getAppPreferences().selectedModelId;
-      if (!selectedModelId) {
-        throw new Error(
-          "Select and download a transcription model in Settings before recording."
-        );
-      }
-
-      const models = await getDownloadedModels();
-      const model = models.find(
-        (candidate) => candidate.id === selectedModelId
-      );
-      if (!model?.isDownloaded) {
-        throw new Error(
-          "The selected transcription model is not downloaded. Choose a downloaded model in Settings."
-        );
-      }
-
-      await loadTranscriptionModel({ id: model.id });
-
-      const unlisten = await listenToAudioLevels((e: AudioLevelEvent) =>
-        setAudioLevel(e.level)
-      );
-      unlistenRefs.current = [unlisten];
-      await startTranscriptionRecording(
-        audioSourceRef.current,
-        saveAudioRef.current
-      );
-      const startTime = Date.now();
-      durationRef.current = setInterval(() => {
-        setState((s) => ({
-          ...s,
-          duration: (Date.now() - startTime) / 1000,
-        }));
-      }, 100);
+      await getSession().start();
       setState((s) => ({ ...s, phase: "recording" }));
     } catch (err) {
       cleanup();
       setState((s) => ({ ...s, phase: "error", error: String(err) }));
     }
-  }, [cleanup]);
+  }, [cleanup, getSession]);
 
   const stopRecording =
     useCallback(async (): Promise<StopRecordingResult | null> => {
-      cleanup();
       setState((s) => ({ ...s, phase: "transcribing" }));
 
       try {
-        const data = await stopTranscriptionRecording();
-        console.log("[stopRecording] RecordingData:", data);
-
-        if (!data.audioPath) {
-          setState((s) => ({
-            ...s,
-            phase: "error",
-            error: "No audio file was saved. Please try again.",
-          }));
-          return null;
-        }
-
-        try {
-          const transcriptionResult = await transcribeRecording(data.audioPath);
-          const transcriptionText = transcriptionResult.text.trim();
-          console.log(
-            "[stopRecording] Transcription result:",
-            transcriptionText.length,
-            "chars"
-          );
-
-          const audioPath = data.audioPath;
-          if (!saveAudioRef.current) {
-            try {
-              await deleteAudioFile(audioPath);
-            } catch {
-              // deletion best-effort
-            }
-            return {
-              ...data,
-              audioPath: null,
-              segments: transcriptionResult.segments,
-            };
-          }
-
-          return {
-            ...data,
-            audioPath,
-            segments: transcriptionResult.segments,
-          };
-        } catch (err) {
-          console.error("Transcription failed:", err);
-          if (!saveAudioRef.current) {
-            try {
-              await deleteAudioFile(data.audioPath);
-            } catch {
-              // deletion best-effort
-            }
-          }
-          setState((s) => ({
-            ...s,
-            phase: "error",
-            error: String(err),
-          }));
-          return null;
-        }
+        return await getSession().stop();
       } catch (err) {
         console.error("Failed to stop recording:", err);
         setState((s) => ({ ...s, phase: "error", error: String(err) }));
         return null;
       }
-    }, [cleanup]);
+    }, [getSession]);
 
-  const reset = useCallback(() => {
-    cleanup();
-    stopTranscriptionRecording().catch(() => {
-      // recording may not be active, ignore errors
-    });
-    audioSourceRef.current = INITIAL_RECORDING_STATE.audioSource;
-    saveAudioRef.current = INITIAL_RECORDING_STATE.saveAudio;
+  const reset = useCallback(async () => {
+    await getSession().resetRecording();
+    getSession().setAudioSource(INITIAL_RECORDING_STATE.audioSource);
+    getSession().setSaveAudio(INITIAL_RECORDING_STATE.saveAudio);
     setState(INITIAL_RECORDING_STATE);
     setAudioLevel(0);
     setSystemAudioPermission(null);
-  }, [cleanup]);
+  }, [getSession]);
 
   const toggleSaveAudio = useCallback(() => {
     setState((s) => {
       const newValue = !s.saveAudio;
-      saveAudioRef.current = newValue;
+      getSession().setSaveAudio(newValue);
       return { ...s, saveAudio: newValue };
     });
-  }, []);
+  }, [getSession]);
 
-  const selectAudioSource = useCallback((audioSource: AudioSource) => {
-    audioSourceRef.current = audioSource;
-    setState((s) => ({ ...s, audioSource }));
-    if (audioSource === "computer_audio") {
-      getSystemAudioPermission()
-        .then(setSystemAudioPermission)
-        .catch(() => setSystemAudioPermission(false));
-    }
-  }, []);
+  const selectAudioSource = useCallback(
+    (audioSource: AudioSource) => {
+      getSession().setAudioSource(audioSource);
+      setState((s) => ({ ...s, audioSource }));
+      if (audioSource === "computer_audio") {
+        getSystemAudioPermission()
+          .then(setSystemAudioPermission)
+          .catch(() => setSystemAudioPermission(false));
+      }
+    },
+    [getSession]
+  );
 
   const openComputerAudioSettings = useCallback(async () => {
     await openSystemAudioSettings();
