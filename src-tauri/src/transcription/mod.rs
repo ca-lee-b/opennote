@@ -114,6 +114,12 @@ mod macos_permissions {
 pub fn get_transcription_state(
     state: State<'_, TranscriptionState>,
 ) -> Result<TranscriptionStateSnapshot, String> {
+    transcription_state_snapshot(&state)
+}
+
+fn transcription_state_snapshot(
+    state: &TranscriptionState,
+) -> Result<TranscriptionStateSnapshot, String> {
     let info = state
         .model_info
         .lock()
@@ -128,12 +134,22 @@ pub fn get_transcription_state(
 }
 
 #[tauri::command]
-pub fn load_transcription_model(
+pub async fn load_transcription_model(
     app: AppHandle,
     request: LoadModelRequest,
     state: State<'_, TranscriptionState>,
 ) -> Result<TranscriptionStateSnapshot, String> {
     let model_path = models::resolve_downloaded_model(&app, &request.id)?;
+
+    {
+        let info = state
+            .model_info
+            .lock()
+            .map_err(|_| "State unavailable".to_string())?;
+        if info.loaded_model_id.as_deref() == Some(request.id.as_str()) {
+            return transcription_state_snapshot(&state);
+        }
+    }
 
     ensure_worker(&state)?;
 
@@ -156,11 +172,11 @@ pub fn load_transcription_model(
         info.loaded_model_path = Some(model_path.display().to_string());
     }
 
-    get_transcription_state(state)
+    transcription_state_snapshot(&state)
 }
 
 #[tauri::command]
-pub fn start_transcription_recording(
+pub async fn start_transcription_recording(
     app: AppHandle,
     request: StartRecordingRequest,
     state: State<'_, TranscriptionState>,
@@ -219,11 +235,11 @@ pub fn start_transcription_recording(
         info.started_wall_time = Some(SystemTime::now());
     }
 
-    get_transcription_state(state)
+    transcription_state_snapshot(&state)
 }
 
 #[tauri::command]
-pub fn stop_transcription_recording(
+pub async fn stop_transcription_recording(
     _app: AppHandle,
     state: State<'_, TranscriptionState>,
 ) -> Result<RecordingData, String> {
@@ -263,7 +279,7 @@ pub fn stop_transcription_recording(
 }
 
 #[tauri::command]
-pub fn transcribe_recording(
+pub async fn transcribe_recording(
     state: State<'_, TranscriptionState>,
     wav_path: String,
 ) -> Result<TranscriptionResult, String> {
