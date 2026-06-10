@@ -2,12 +2,16 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AudioLevelEvent,
-  AudioSource,
+  EnqueueRecordingTranscriptionRequest,
+  EnqueueRecordingTranscriptionResult,
+  ImportAudioTranscriptionRequest,
   LoadTranscriptionModelRequest,
   ModelDownloadInfo,
   ModelDownloadProgressEvent,
   RecordingData,
-  TranscriptionResult,
+  RecordingProcessingStatus,
+  StartTranscriptionRecordingRequest,
+  TranscriptionPreviewEvent,
   TranscriptionStateSnapshot,
 } from "@/features/transcription/types";
 
@@ -21,12 +25,13 @@ export function loadTranscriptionModel(
   return invoke("load_transcription_model", { request });
 }
 
-export function startTranscriptionRecording(
-  audioSource: AudioSource,
-  saveAudio: boolean
-): Promise<TranscriptionStateSnapshot> {
+export function startTranscriptionRecording({
+  audioSource,
+  livePreviewEnabled,
+  saveAudio,
+}: StartTranscriptionRecordingRequest): Promise<TranscriptionStateSnapshot> {
   return invoke("start_transcription_recording", {
-    request: { audioSource, saveAudio },
+    request: { audioSource, livePreviewEnabled, saveAudio },
   });
 }
 
@@ -42,10 +47,26 @@ export function stopTranscriptionRecording(): Promise<RecordingData> {
   return invoke("stop_transcription_recording");
 }
 
-export function transcribeRecording(
-  wavPath: string
-): Promise<TranscriptionResult> {
-  return invoke("transcribe_recording", { wavPath });
+export function enqueueRecordingTranscription(
+  request: EnqueueRecordingTranscriptionRequest
+): Promise<EnqueueRecordingTranscriptionResult> {
+  return invoke("enqueue_recording_transcription", { request });
+}
+
+export function importAudioForTranscription(
+  request: ImportAudioTranscriptionRequest
+): Promise<EnqueueRecordingTranscriptionResult> {
+  return invoke("import_audio_for_transcription", { request });
+}
+
+export function listRecordingProcessingStatuses(): Promise<
+  RecordingProcessingStatus[]
+> {
+  return invoke("list_recording_processing_statuses");
+}
+
+export function resumeRecordingProcessing(recordingId: string): Promise<void> {
+  return invoke("resume_recording_processing", { recordingId });
 }
 
 export function deleteAudioFile(path: string): Promise<void> {
@@ -60,6 +81,14 @@ export function listenToAudioLevels(
   handler: (event: AudioLevelEvent) => void
 ): Promise<UnlistenFn> {
   return listen<AudioLevelEvent>("audio-level", (event) => {
+    handler(event.payload);
+  });
+}
+
+export function listenToTranscriptionPreview(
+  handler: (event: TranscriptionPreviewEvent) => void
+): Promise<UnlistenFn> {
+  return listen<TranscriptionPreviewEvent>("transcription-preview", (event) => {
     handler(event.payload);
   });
 }

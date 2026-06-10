@@ -1,32 +1,37 @@
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
-  deleteAudioFile,
   getDownloadedModels,
   listenToAudioLevels,
+  listenToTranscriptionPreview,
   loadTranscriptionModel,
   startTranscriptionRecording,
   stopTranscriptionRecording,
-  transcribeRecording,
 } from "@/features/transcription/api/transcription-service";
 import type {
   AudioLevelEvent,
   AudioSource,
-  TranscriptionResult,
+  TranscriptionPreviewEvent,
 } from "@/features/transcription/types";
 import { getAppPreferences } from "@/lib/app-preferences";
 
 interface CaptureSessionOptions {
   audioSource: AudioSource;
+  livePreviewEnabled: boolean;
   onAudioLevel: (level: number) => void;
   onDurationChange: (duration: number) => void;
+  onTranscriptionPreview: (event: TranscriptionPreviewEvent) => void;
   saveAudio: boolean;
 }
 
+interface StartOptions {
+  shouldCancel?: () => boolean;
+}
+
 export interface StopRecordingResult {
-  audioPath: string | null;
+  audioPath: string;
   duration: number;
   modelId: string;
-  segments: TranscriptionResult["segments"];
+  saveAudio: boolean;
   startedAt: string | null;
 }
 
@@ -35,13 +40,20 @@ export class CaptureSession {
   private durationTimer: ReturnType<typeof setInterval> | null = null;
   private readonly onAudioLevel: (level: number) => void;
   private readonly onDurationChange: (duration: number) => void;
+  private readonly onTranscriptionPreview: (
+    event: TranscriptionPreviewEvent
+  ) => void;
+  private livePreviewEnabled: boolean;
   private saveAudio: boolean;
   private unlistenAudioLevel: UnlistenFn | null = null;
+  private unlistenTranscriptionPreview: UnlistenFn | null = null;
 
   constructor(options: CaptureSessionOptions) {
     this.audioSource = options.audioSource;
+    this.livePreviewEnabled = options.livePreviewEnabled;
     this.onAudioLevel = options.onAudioLevel;
     this.onDurationChange = options.onDurationChange;
+    this.onTranscriptionPreview = options.onTranscriptionPreview;
     this.saveAudio = options.saveAudio;
   }
 
@@ -49,12 +61,23 @@ export class CaptureSession {
     this.audioSource = audioSource;
   }
 
+  setLivePreviewEnabled(livePreviewEnabled: boolean): void {
+    this.livePreviewEnabled = livePreviewEnabled;
+  }
+
   setSaveAudio(saveAudio: boolean): void {
     this.saveAudio = saveAudio;
   }
 
-  async start(): Promise<void> {
+  async start(options: StartOptions = {}): Promise<void> {
+    let recordingStarted = false;
     try {
+      const throwIfCancelled = () => {
+        if (options.shouldCancel?.()) {
+          throw new Error("Recording start was cancelled.");
+        }
+      };
+
       const selectedModelId = getAppPreferences().selectedModelId;
       if (!selectedModelId) {
         throw new Error(
@@ -63,6 +86,8 @@ export class CaptureSession {
       }
 
       const models = await getDownloadedModels();
+      throwIfCancelled();
+
       const model = models.find(
         (candidate) => candidate.id === selectedModelId
       );
@@ -73,15 +98,36 @@ export class CaptureSession {
       }
 
       await loadTranscriptionModel({ id: model.id });
+      throwIfCancelled();
+
       this.unlistenAudioLevel = await listenToAudioLevels(
         (event: AudioLevelEvent) => {
           this.onAudioLevel(event.level);
         }
       );
-      await startTranscriptionRecording(this.audioSource, this.saveAudio);
+      if (this.livePreviewEnabled) {
+        this.unlistenTranscriptionPreview = await listenToTranscriptionPreview(
+          this.onTranscriptionPreview
+        );
+      }
+      throwIfCancelled();
+
+      await startTranscriptionRecording({
+        audioSource: this.audioSource,
+        livePreviewEnabled: this.livePreviewEnabled,
+        saveAudio: this.saveAudio,
+      });
+      recordingStarted = true;
+      throwIfCancelled();
+
       this.startDurationTimer();
     } catch (error) {
       this.cleanup();
+      if (recordingStarted) {
+        await stopTranscriptionRecording().catch(() => {
+          // recording may have already stopped, ignore errors
+        });
+      }
       throw error;
     }
   }
@@ -95,43 +141,18 @@ export class CaptureSession {
       throw new Error("No audio file was saved. Please try again.");
     }
 
-    try {
-      const transcriptionResult = await transcribeRecording(
-        recordingData.audioPath
-      );
-      const transcriptionText = transcriptionResult.text.trim();
-      console.log(
-        "[stopRecording] Transcription result:",
-        transcriptionText.length,
-        "chars"
-      );
-
-      if (!this.saveAudio) {
-        await this.deleteAudioBestEffort(recordingData.audioPath);
-        return {
-          ...recordingData,
-          audioPath: null,
-          segments: transcriptionResult.segments,
-        };
-      }
-
-      return {
-        ...recordingData,
-        audioPath: recordingData.audioPath,
-        segments: transcriptionResult.segments,
-      };
-    } catch (error) {
-      console.error("Transcription failed:", error);
-      if (!this.saveAudio) {
-        await this.deleteAudioBestEffort(recordingData.audioPath);
-      }
-      throw error;
-    }
+    return {
+      ...recordingData,
+      audioPath: recordingData.audioPath,
+      saveAudio: this.saveAudio,
+    };
   }
 
   cleanup(): void {
     this.unlistenAudioLevel?.();
     this.unlistenAudioLevel = null;
+    this.unlistenTranscriptionPreview?.();
+    this.unlistenTranscriptionPreview = null;
 
     if (this.durationTimer) {
       clearInterval(this.durationTimer);
@@ -144,14 +165,6 @@ export class CaptureSession {
     await stopTranscriptionRecording().catch(() => {
       // recording may not be active, ignore errors
     });
-  }
-
-  private async deleteAudioBestEffort(audioPath: string): Promise<void> {
-    try {
-      await deleteAudioFile(audioPath);
-    } catch {
-      // deletion best-effort
-    }
   }
 
   private startDurationTimer(): void {

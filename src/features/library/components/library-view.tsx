@@ -1,6 +1,6 @@
 import { MoreHorizontalIcon, Share04Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -81,6 +81,16 @@ function RecordingToolbar({ recording }: { recording: Recording }) {
 export function LibraryView() {
   const initialize = useRecordingsStore((s) => s.initialize);
   const isLoading = useRecordingsStore((s) => s.isLoading);
+  const loadProcessingStatuses = useRecordingsStore(
+    (s) => s.loadProcessingStatuses
+  );
+  const loadRecordingWithLines = useRecordingsStore(
+    (s) => s.loadRecordingWithLines
+  );
+  const loadRecordings = useRecordingsStore((s) => s.loadRecordings);
+  const processingStatusesByRecordingId = useRecordingsStore(
+    (s) => s.processingStatusesByRecordingId
+  );
   const recordings = useRecordingsStore((s) => s.recordings);
   const selectedRecordingId = useRecordingsStore((s) => s.selectedRecordingId);
   const selectedRecording =
@@ -93,6 +103,42 @@ export function LibraryView() {
   useEffect(() => {
     initialize();
   }, [initialize]);
+
+  const hasActiveProcessing = useMemo(
+    () =>
+      Object.values(processingStatusesByRecordingId).some((status) =>
+        ["queued", "chunking", "transcribing"].includes(status.status)
+      ),
+    [processingStatusesByRecordingId]
+  );
+
+  useEffect(() => {
+    if (!hasActiveProcessing) {
+      return;
+    }
+
+    const refreshProcessing = async () => {
+      await loadProcessingStatuses();
+      await loadRecordings();
+      if (selectedRecordingId) {
+        await loadRecordingWithLines(selectedRecordingId);
+      }
+    };
+
+    const interval = window.setInterval(() => {
+      refreshProcessing().catch((error) => {
+        console.error("Failed to refresh recording processing status:", error);
+      });
+    }, 1500);
+
+    return () => window.clearInterval(interval);
+  }, [
+    hasActiveProcessing,
+    loadProcessingStatuses,
+    loadRecordingWithLines,
+    loadRecordings,
+    selectedRecordingId,
+  ]);
 
   if (isLoading) {
     return (

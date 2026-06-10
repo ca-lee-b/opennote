@@ -11,9 +11,15 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { SidebarMenuButton, useSidebar } from "@/components/ui/sidebar";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { useRecordingsStore } from "@/stores/use-recordings-store";
 import { formatDuration, type Recording } from "@/types/recording";
+import type {
+  HighlightSegment,
+  TranscriptSnippet,
+} from "../utils/recording-search";
+import { getRecordingStatusView } from "../utils/recording-status";
 import { RecordingActionDialogs } from "./recording-action-dialogs";
 import { RecordingMoreActionsMenuItems } from "./recording-more-actions-menu-items";
 import { RecordingSidebarExportContextSubmenu } from "./recording-sidebar-export-context-submenu";
@@ -23,12 +29,17 @@ interface RecordingSidebarRowProps {
   onOpenContextMenu: (recordingId: string) => void;
   onSelect: (recordingId: string, event: MouseEvent<HTMLButtonElement>) => void;
   recording: Recording;
+  searchMatch?: {
+    snippet: TranscriptSnippet | null;
+    titleSegments: HighlightSegment[];
+  };
 }
 
 export function RecordingSidebarRow({
   onOpenContextMenu,
   onSelect,
   recording,
+  searchMatch,
 }: RecordingSidebarRowProps) {
   const { state } = useSidebar();
   const isCollapsed = state === "collapsed";
@@ -36,8 +47,15 @@ export function RecordingSidebarRow({
   const selectedRecordingIds = useRecordingsStore(
     (state) => state.selectedRecordingIds
   );
+  const processingStatus = useRecordingsStore(
+    (state) => state.processingStatusesByRecordingId[recording.id]
+  );
   const isSelected = selectedRecordingIds.includes(recording.id);
   const deleteRecordingIds = isSelected ? selectedRecordingIds : [recording.id];
+  const statusView = getRecordingStatusView({
+    isPartial: recording.isPartial,
+    processingStatus,
+  });
 
   const actions = useRecordingActions(recording, {
     deleteRecordingIds,
@@ -78,21 +96,39 @@ export function RecordingSidebarRow({
                     isSelected ? "font-semibold" : "font-medium"
                   )}
                 >
-                  {recording.title}
+                  <HighlightedText
+                    segments={
+                      searchMatch?.titleSegments ?? [
+                        { text: recording.title, isMatch: false, start: 0 },
+                      ]
+                    }
+                  />
                 </span>
+                {searchMatch?.snippet && (
+                  <span className="w-full truncate text-muted-foreground text-xs leading-5">
+                    {searchMatch.snippet.hasLeadingEllipsis && "…"}
+                    <HighlightedText segments={searchMatch.snippet.segments} />
+                    {searchMatch.snippet.hasTrailingEllipsis && "…"}
+                  </span>
+                )}
                 <span className="w-full truncate text-muted-foreground text-xs leading-5">
                   {formatDistanceToNow(new Date(recording.createdAt), {
                     addSuffix: true,
                   })}{" "}
                   • {formatDuration(recording.duration)}
                 </span>
-                {recording.isPartial && (
-                  <Badge
-                    className="mt-1 h-4 rounded-md px-1.5 font-medium text-[10px]"
-                    variant="secondary"
-                  >
-                    Incomplete
-                  </Badge>
+                {statusView.label && (
+                  <div className="mt-1 flex items-center gap-1.5">
+                    {statusView.isActive && (
+                      <Spinner className="size-3 text-primary" />
+                    )}
+                    <Badge
+                      className="h-4 rounded-md px-1.5 font-medium text-[10px]"
+                      variant="secondary"
+                    >
+                      {statusView.label}
+                    </Badge>
+                  </div>
                 )}
               </div>
             )}
@@ -111,6 +147,25 @@ export function RecordingSidebarRow({
         </ContextMenuContent>
       </ContextMenu>
       <RecordingActionDialogs actions={actions} />
+    </>
+  );
+}
+
+function HighlightedText({ segments }: { segments: HighlightSegment[] }) {
+  return (
+    <>
+      {segments.map((segment) =>
+        segment.isMatch ? (
+          <mark
+            className="rounded-sm bg-primary/15 px-0.5 text-foreground"
+            key={`${segment.start}-${segment.text}`}
+          >
+            {segment.text}
+          </mark>
+        ) : (
+          <span key={`${segment.start}-${segment.text}`}>{segment.text}</span>
+        )
+      )}
     </>
   );
 }

@@ -4,6 +4,12 @@ export interface LoadTranscriptionModelRequest {
   id: string;
 }
 
+export interface StartTranscriptionRecordingRequest {
+  audioSource: AudioSource;
+  livePreviewEnabled: boolean;
+  saveAudio: boolean;
+}
+
 export interface TranscriptionStateSnapshot {
   isModelLoaded: boolean;
   isRecording: boolean;
@@ -17,10 +23,45 @@ export interface RecordingData {
   startedAt: string | null;
 }
 
-export interface TranscriptionResult {
+export interface EnqueueRecordingTranscriptionRequest {
+  audioPath: string;
+  duration: number;
   modelId: string;
-  segments: TranscriptionSegment[];
-  text: string;
+  saveAudio: boolean;
+  startedAt: string | null;
+  title: string;
+}
+
+export interface EnqueueRecordingTranscriptionResult {
+  jobId: string;
+  recordingId: string;
+}
+
+export interface ImportAudioTranscriptionRequest {
+  modelId: string;
+  sourceAudioPath: string;
+  title: string;
+}
+
+export type RecordingProcessingState =
+  | "queued"
+  | "chunking"
+  | "transcribing"
+  | "complete"
+  | "partial"
+  | "failed"
+  | "interrupted"
+  | "cancelled";
+
+export interface RecordingProcessingStatus {
+  completedChunks: number;
+  error: string | null;
+  failedChunks: number;
+  jobId: string;
+  recordingId: string;
+  status: RecordingProcessingState;
+  totalChunks: number;
+  updatedAt: string;
 }
 
 export interface ModelDownloadInfo {
@@ -39,6 +80,11 @@ export interface TranscriptionSegment {
   endTimeSecs: number;
   startTimeSecs: number;
   text: string;
+}
+
+export interface TranscriptionPreviewEvent extends TranscriptionSegment {
+  isFinal: boolean;
+  sequence: number;
 }
 
 export type DownloadStatus =

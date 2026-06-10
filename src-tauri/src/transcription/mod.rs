@@ -1,5 +1,7 @@
 pub mod audio;
+mod import_audio;
 pub mod models;
+pub mod pipeline;
 mod whisper;
 mod worker;
 
@@ -9,7 +11,7 @@ use std::time::{Instant, SystemTime};
 use tauri::{AppHandle, Manager, State};
 
 pub use models::DownloadState;
-use worker::{RecordingData, TranscriptionResult, TranscriptionWorker};
+use worker::{RecordingData, TranscriptionWorker};
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -50,6 +52,7 @@ pub struct LoadModelRequest {
 #[serde(rename_all = "camelCase")]
 pub struct StartRecordingRequest {
     audio_source: AudioSource,
+    live_preview_enabled: bool,
     save_audio: bool,
 }
 
@@ -147,7 +150,12 @@ pub async fn load_transcription_model(
             .lock()
             .map_err(|_| "State unavailable".to_string())?;
         if info.loaded_model_id.as_deref() == Some(request.id.as_str()) {
-            return transcription_state_snapshot(&state);
+            return Ok(TranscriptionStateSnapshot {
+                is_model_loaded: true,
+                is_recording: info.is_recording,
+                loaded_model_id: info.loaded_model_id.clone(),
+                loaded_model_path: info.loaded_model_path.clone(),
+            });
         }
     }
 
@@ -221,7 +229,12 @@ pub async fn start_transcription_recording(
             .lock()
             .map_err(|_| "Worker state unavailable".to_string())?;
         if let Some(ref worker) = *worker_guard {
-            worker.start_recording(app.clone(), wav_path, request.audio_source)?;
+            worker.start_recording(
+                app.clone(),
+                wav_path,
+                request.audio_source,
+                request.live_preview_enabled,
+            )?;
         }
     }
 
@@ -276,22 +289,6 @@ pub async fn stop_transcription_recording(
     }
 
     Ok(recording_data)
-}
-
-#[tauri::command]
-pub async fn transcribe_recording(
-    state: State<'_, TranscriptionState>,
-    wav_path: String,
-) -> Result<TranscriptionResult, String> {
-    let worker_guard = state
-        .worker
-        .lock()
-        .map_err(|_| "Worker state unavailable".to_string())?;
-    if let Some(ref worker) = *worker_guard {
-        worker.transcribe_file(std::path::PathBuf::from(wav_path))
-    } else {
-        Err("No worker available".to_string())
-    }
 }
 
 #[tauri::command]

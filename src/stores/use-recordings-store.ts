@@ -1,12 +1,22 @@
 import Database from "@tauri-apps/plugin-sql";
 import { create } from "zustand";
 import {
-  type CreateRecordingInput,
   type CreateTranscriptLineInput,
   type FinalizeTranscriptLineInput,
   RecordingsRepository,
 } from "@/features/library/api/recordings-repository";
-import type { TranscriptionSegment } from "@/features/transcription/types";
+import {
+  enqueueRecordingTranscription as enqueueRecordingTranscriptionCommand,
+  importAudioForTranscription as importAudioForTranscriptionCommand,
+  listRecordingProcessingStatuses,
+  resumeRecordingProcessing as resumeRecordingProcessingCommand,
+} from "@/features/transcription/api/transcription-service";
+import type {
+  EnqueueRecordingTranscriptionRequest,
+  EnqueueRecordingTranscriptionResult,
+  RecordingProcessingStatus,
+} from "@/features/transcription/types";
+import { getAppPreferences } from "@/lib/app-preferences";
 import {
   markRecordingAsRecent,
   reconcileRecentRecordingIds,
@@ -16,6 +26,15 @@ import { generateDefaultTitle } from "@/types/recording";
 
 /** Module-level repository — not serializable state, so it lives outside Zustand. */
 let repository: RecordingsRepository | null = null;
+const AUDIO_EXTENSION_PATTERN = /\.[^.]+$/;
+const PATH_SEPARATOR_PATTERN = /[/\\]/;
+
+function titleFromAudioPath(path: string): string {
+  const filename = path.split(PATH_SEPARATOR_PATTERN).pop() ?? path;
+  return (
+    filename.replace(AUDIO_EXTENSION_PATTERN, "").trim() || "Imported Audio"
+  );
+}
 
 function arraysMatch(left: string[], right: string[]) {
   return (
@@ -26,24 +45,30 @@ function arraysMatch(left: string[], right: string[]) {
 
 interface RecordingsState {
   createRecording: (partial?: Partial<Recording>) => Promise<Recording>;
-  createRecordingWithSegments: (
-    input: Omit<CreateRecordingInput, "fullText" | "title"> & {
-      title?: string;
-    },
-    segments: TranscriptionSegment[]
-  ) => Promise<Recording>;
   deleteRecording: (id: string) => Promise<void>;
   deleteRecordings: (ids: string[]) => Promise<void>;
+  enqueueRecordingTranscription: (
+    input: Omit<EnqueueRecordingTranscriptionRequest, "title"> & {
+      title?: string;
+    }
+  ) => Promise<EnqueueRecordingTranscriptionResult>;
   finalizeLine: (line: FinalizeTranscriptLineInput) => Promise<void>;
+  importAudioFile: (
+    sourceAudioPath: string
+  ) => Promise<EnqueueRecordingTranscriptionResult>;
   initialize: () => Promise<void>;
   insertLine: (line: CreateTranscriptLineInput) => Promise<TranscriptLine>;
+  isImportingAudio: boolean;
   isLoading: boolean;
   linesByRecordingId: Record<string, TranscriptLine[]>;
+  loadProcessingStatuses: () => Promise<RecordingProcessingStatus[]>;
   loadRecordings: (options?: { selectDefault?: boolean }) => Promise<void>;
   loadRecordingWithLines: (id: string) => Promise<void>;
+  processingStatusesByRecordingId: Record<string, RecordingProcessingStatus>;
   recentRecordingIds: string[];
   recordings: Recording[];
   renameRecording: (id: string, title: string) => Promise<void>;
+  resumeRecordingProcessing: (recordingId: string) => Promise<void>;
   searchText: string;
   selectedRecordingId: string | null;
   selectedRecordingIds: string[];
@@ -107,12 +132,14 @@ function reconcileRecordingSelection({
 
 export const useRecordingsStore = create<RecordingsState>((set, get) => ({
   recordings: [],
+  processingStatusesByRecordingId: {},
   recentRecordingIds: [],
   linesByRecordingId: {},
   selectedRecordingId: null,
   selectedRecordingIds: [],
   searchText: "",
   isLoading: true,
+  isImportingAudio: false,
 
   initialize: async () => {
     try {
@@ -120,6 +147,7 @@ export const useRecordingsStore = create<RecordingsState>((set, get) => ({
       repository = new RecordingsRepository(db);
       await repository.initialize();
       await get().loadRecordings({ selectDefault: true });
+      await get().loadProcessingStatuses();
     } catch (error) {
       console.error("Failed to initialize database:", error);
       set({ isLoading: false });
@@ -222,22 +250,41 @@ export const useRecordingsStore = create<RecordingsState>((set, get) => ({
     return recording;
   },
 
-  createRecordingWithSegments: async (input, segments) => {
-    if (!repository) {
-      throw new Error("Database not initialized");
-    }
-
-    const recording = await repository.createRecordingWithSegments(
-      {
-        ...input,
-        title: input.title ?? generateDefaultTitle(),
-      },
-      segments
-    );
+  enqueueRecordingTranscription: async (input) => {
+    const startedAt = input.startedAt ? new Date(input.startedAt) : new Date();
+    const result = await enqueueRecordingTranscriptionCommand({
+      ...input,
+      title: input.title ?? generateDefaultTitle(startedAt),
+    });
 
     await get().loadRecordings();
-    get().selectRecording(recording.id);
-    return recording;
+    get().selectRecording(result.recordingId);
+    await get().loadProcessingStatuses();
+    return result;
+  },
+
+  importAudioFile: async (sourceAudioPath) => {
+    set({ isImportingAudio: true });
+    try {
+      const selectedModelId = getAppPreferences().selectedModelId;
+      if (!selectedModelId) {
+        throw new Error(
+          "Select and download a transcription model in Settings before importing audio."
+        );
+      }
+      const result = await importAudioForTranscriptionCommand({
+        modelId: selectedModelId,
+        sourceAudioPath,
+        title: titleFromAudioPath(sourceAudioPath),
+      });
+
+      await get().loadRecordings();
+      get().selectRecording(result.recordingId);
+      await get().loadProcessingStatuses();
+      return result;
+    } finally {
+      set({ isImportingAudio: false });
+    }
   },
 
   deleteRecording: async (id) => {
@@ -278,6 +325,16 @@ export const useRecordingsStore = create<RecordingsState>((set, get) => ({
       };
     });
     await get().loadRecordings();
+    await get().loadProcessingStatuses();
+  },
+
+  loadProcessingStatuses: async () => {
+    const statuses = await listRecordingProcessingStatuses();
+    const statusesByRecordingId = Object.fromEntries(
+      statuses.map((status) => [status.recordingId, status])
+    );
+    set({ processingStatusesByRecordingId: statusesByRecordingId });
+    return statuses;
   },
 
   finalizeLine: async (line) => {
@@ -331,6 +388,12 @@ export const useRecordingsStore = create<RecordingsState>((set, get) => ({
         recording.id === id ? { ...recording, title } : recording
       ),
     }));
+  },
+
+  resumeRecordingProcessing: async (recordingId) => {
+    await resumeRecordingProcessingCommand(recordingId);
+    await get().loadProcessingStatuses();
+    await get().loadRecordings();
   },
 
   setPartial: async (id, isPartial) => {

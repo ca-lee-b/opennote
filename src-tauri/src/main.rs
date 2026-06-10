@@ -2,7 +2,7 @@
 
 use tauri_plugin_sql::{Migration, MigrationKind};
 
-mod recordings;
+mod db;
 mod transcription;
 
 fn main() {
@@ -102,6 +102,55 @@ fn main() {
             ALTER TABLE transcript_lines ADD COLUMN end_time_secs REAL NOT NULL DEFAULT 0;",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 7,
+            description: "create recording processing job tables",
+            sql: "CREATE TABLE IF NOT EXISTS recording_processing_jobs (
+                id TEXT PRIMARY KEY,
+                recording_id TEXT NOT NULL UNIQUE,
+                model_id TEXT NOT NULL,
+                source_audio_path TEXT NOT NULL,
+                save_audio INTEGER NOT NULL DEFAULT 1,
+                status TEXT NOT NULL,
+                total_chunks INTEGER NOT NULL DEFAULT 0,
+                completed_chunks INTEGER NOT NULL DEFAULT 0,
+                failed_chunks INTEGER NOT NULL DEFAULT 0,
+                error TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT,
+                FOREIGN KEY (recording_id) REFERENCES recordings(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS recording_processing_chunks (
+                id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL,
+                recording_id TEXT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                logical_start_secs REAL NOT NULL,
+                logical_end_secs REAL NOT NULL,
+                source_start_secs REAL NOT NULL,
+                source_end_secs REAL NOT NULL,
+                chunk_path TEXT NOT NULL,
+                status TEXT NOT NULL,
+                transcript_json TEXT NOT NULL DEFAULT '[]',
+                error TEXT,
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (job_id) REFERENCES recording_processing_jobs(id) ON DELETE CASCADE,
+                FOREIGN KEY (recording_id) REFERENCES recordings(id) ON DELETE CASCADE,
+                UNIQUE(job_id, chunk_index)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_processing_jobs_status
+                ON recording_processing_jobs(status, updated_at);
+            CREATE INDEX IF NOT EXISTS idx_processing_chunks_status
+                ON recording_processing_chunks(status, chunk_index);
+            CREATE INDEX IF NOT EXISTS idx_processing_chunks_recording
+                ON recording_processing_chunks(recording_id, chunk_index);",
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
@@ -116,6 +165,7 @@ fn main() {
             worker: std::sync::Mutex::new(None),
         })
         .manage(transcription::DownloadState::default())
+        .manage(transcription::pipeline::PipelineState::default())
         .setup(|app| {
             transcription::models::cleanup_legacy_models(app.handle())?;
             Ok(())
@@ -134,16 +184,19 @@ fn main() {
             transcription::load_transcription_model,
             transcription::start_transcription_recording,
             transcription::stop_transcription_recording,
-            transcription::transcribe_recording,
             transcription::delete_audio_file,
             transcription::clear_all_audio_files,
+            transcription::pipeline::enqueue_recording_transcription,
+            transcription::pipeline::import_audio_for_transcription,
+            transcription::pipeline::list_recording_processing_statuses,
+            transcription::pipeline::resume_recording_processing,
+            transcription::pipeline::delete_recording,
             transcription::get_system_audio_permission,
             transcription::open_system_audio_settings,
             transcription::models::get_downloaded_models,
             transcription::models::download_model,
             transcription::models::delete_model,
             transcription::models::cancel_download,
-            recordings::create_recording_with_segments,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

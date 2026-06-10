@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import type Database from "@tauri-apps/plugin-sql";
-import type { TranscriptionSegment } from "@/features/transcription/types";
 import type {
   Recording,
   RecordingRow,
@@ -108,21 +107,8 @@ export class RecordingsRepository {
     return recording;
   }
 
-  async createRecordingWithSegments(
-    input: Omit<CreateRecordingInput, "fullText">,
-    segments: TranscriptionSegment[]
-  ): Promise<Recording> {
-    const recording = normalizeRecordingWrite(input);
-    const result = await invoke<{ fullText: string }>(
-      "create_recording_with_segments",
-      { request: { ...recording, segments } }
-    );
-
-    return { ...recording, fullText: result.fullText };
-  }
-
   async deleteRecording(id: string): Promise<void> {
-    await this.db.execute("DELETE FROM recordings WHERE id = $1", [id]);
+    await invoke("delete_recording", { recordingId: id });
   }
 
   async finalizeLine(input: FinalizeTranscriptLineInput): Promise<void> {

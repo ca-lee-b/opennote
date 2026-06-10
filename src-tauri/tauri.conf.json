@@ -38,7 +38,7 @@
     "windows": [
       {
         "title": "OpenNote",
-        "width": 700,
+        "width": 1200,
         "height": 800,
         "dragDropEnabled": false,
         "hiddenTitle": true,

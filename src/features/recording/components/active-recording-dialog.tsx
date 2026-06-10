@@ -1,5 +1,6 @@
 import { Mic01Icon, StopCircleIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +16,7 @@ import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import type { StopRecordingResult } from "@/features/recording/hooks/use-active-recording";
+import type { TranscriptionPreviewEvent } from "@/features/transcription/types";
 import { useRecordingsStore } from "@/stores/use-recordings-store";
 import { formatDuration } from "@/types/recording";
 import { useActiveRecording } from "../hooks/use-active-recording";
@@ -51,12 +53,56 @@ function getTitleText(phase: string): string {
   return "New Recording";
 }
 
+function LiveTranscriptionPreview({
+  isEnabled,
+  segments,
+}: {
+  isEnabled: boolean;
+  segments: TranscriptionPreviewEvent[];
+}) {
+  if (!isEnabled) {
+    return (
+      <div className="flex h-24 items-center justify-center px-8 text-center text-muted-foreground text-sm">
+        Live transcription preview is disabled.
+      </div>
+    );
+  }
+
+  const [currentSegment] = segments.slice(-1);
+
+  if (!currentSegment) {
+    return (
+      <div className="flex h-24 items-center justify-center text-muted-foreground text-sm">
+        Listening...
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative flex h-24 items-center justify-center overflow-hidden px-8 text-center">
+      <AnimatePresence initial={false}>
+        <motion.p
+          animate={{ opacity: 1, y: 0 }}
+          className="absolute max-w-md text-balance font-medium text-foreground text-sm leading-6"
+          exit={{ opacity: 0, y: -34 }}
+          initial={{ opacity: 0, y: 28 }}
+          key={currentSegment.sequence}
+          transition={{ duration: 0.42, ease: "easeOut" }}
+        >
+          {currentSegment.text}
+        </motion.p>
+      </AnimatePresence>
+    </div>
+  );
+}
+
 export function ActiveRecordingDialog({
   onOpenChange,
   open,
 }: ActiveRecordingDialogProps) {
   const {
     audioLevel,
+    cancelLoading,
     openComputerAudioSettings,
     reportError,
     reset,
@@ -67,8 +113,8 @@ export function ActiveRecordingDialog({
     systemAudioPermission,
     toggleSaveAudio,
   } = useActiveRecording();
-  const createRecordingWithSegments = useRecordingsStore(
-    (s) => s.createRecordingWithSegments
+  const enqueueRecordingTranscription = useRecordingsStore(
+    (s) => s.enqueueRecordingTranscription
   );
   const [isSaving, setIsSaving] = useState(false);
 
@@ -80,12 +126,17 @@ export function ActiveRecordingDialog({
       ) {
         return;
       }
+      if (!nextOpen && state.phase === "loading-model") {
+        cancelLoading();
+        onOpenChange(nextOpen);
+        return;
+      }
       if (!nextOpen) {
         await reset();
       }
       onOpenChange(nextOpen);
     },
-    [state.phase, reset, onOpenChange]
+    [state.phase, cancelLoading, reset, onOpenChange]
   );
 
   const handleStart = useCallback(async () => {
@@ -103,19 +154,16 @@ export function ActiveRecordingDialog({
     }
 
     try {
-      const recording = await createRecordingWithSegments(
-        {
-          audioPath: result.audioPath,
-          createdAt: result.startedAt ?? undefined,
-          duration: result.duration,
-          isPartial: false,
-          modelId: result.modelId,
-        },
-        result.segments
-      );
-      console.log("[handleStop] Created recording:", recording.id);
+      const queued = await enqueueRecordingTranscription({
+        audioPath: result.audioPath,
+        duration: result.duration,
+        modelId: result.modelId,
+        saveAudio: result.saveAudio,
+        startedAt: result.startedAt,
+      });
+      console.log("[handleStop] Queued recording:", queued.recordingId);
     } catch (err) {
-      console.error("Failed to save recording:", err);
+      console.error("Failed to queue recording transcription:", err);
       reportError(err);
       setIsSaving(false);
       return;
@@ -126,7 +174,7 @@ export function ActiveRecordingDialog({
     onOpenChange(false);
   }, [
     stopRecording,
-    createRecordingWithSegments,
+    enqueueRecordingTranscription,
     reportError,
     reset,
     onOpenChange,
@@ -165,9 +213,10 @@ export function ActiveRecordingDialog({
 
             <Separator />
 
-            <div className="flex items-center justify-center py-4 text-muted-foreground text-sm">
-              Listening...
-            </div>
+            <LiveTranscriptionPreview
+              isEnabled={state.livePreviewEnabled}
+              segments={state.previewSegments}
+            />
           </>
         )}
 

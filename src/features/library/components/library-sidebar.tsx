@@ -8,9 +8,19 @@ import {
   Settings02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { ChevronDown, Upload } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type MouseEvent, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { ButtonGroup } from "@/components/ui/button-group";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Sidebar,
   SidebarContent,
@@ -28,6 +38,7 @@ import {
 
 import { cn } from "@/lib/utils";
 import { useRecordingsStore } from "@/stores/use-recordings-store";
+import { searchRecordings } from "../utils/recording-search";
 import { SidebarEmptyState } from "./empty-states";
 import { RecordingSidebarRow } from "./recording-sidebar-row";
 
@@ -65,6 +76,45 @@ function RecentsEmptyState() {
   );
 }
 
+function SearchEmptyState() {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center rounded-xl border border-border/70 border-dashed bg-background/40 p-8 text-center">
+      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-md border border-border bg-background">
+        <HugeiconsIcon
+          className="text-muted-foreground"
+          icon={Search01Icon}
+          size={24}
+          strokeWidth={2}
+        />
+      </div>
+      <h3 className="font-semibold text-foreground text-sm">No matches</h3>
+      <p className="mt-1 text-muted-foreground text-xs">
+        Try another recording title or transcript phrase.
+      </p>
+    </div>
+  );
+}
+
+function getEmptyState({
+  hasSearch,
+  section,
+  visibleRecordingCount,
+}: {
+  hasSearch: boolean;
+  section: LibrarySection;
+  visibleRecordingCount: number;
+}) {
+  if (hasSearch && visibleRecordingCount > 0) {
+    return SearchEmptyState;
+  }
+
+  if (section === "recents" && visibleRecordingCount === 0) {
+    return RecentsEmptyState;
+  }
+
+  return SidebarEmptyState;
+}
+
 export function LibrarySidebar({
   onOpenRecording,
   onOpenSettings,
@@ -77,12 +127,15 @@ export function LibrarySidebar({
   const recordings = useRecordingsStore((s) => s.recordings);
   const recentRecordingIds = useRecordingsStore((s) => s.recentRecordingIds);
   const createRecording = useRecordingsStore((s) => s.createRecording);
+  const importAudioFile = useRecordingsStore((s) => s.importAudioFile);
+  const isImportingAudio = useRecordingsStore((s) => s.isImportingAudio);
   const selectedRecordingIds = useRecordingsStore(
     (s) => s.selectedRecordingIds
   );
   const selectRecording = useRecordingsStore((s) => s.selectRecording);
   const selectRecordings = useRecordingsStore((s) => s.selectRecordings);
   const selectionAnchorId = useRef<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
   const [section, setSection] = useState<LibrarySection>("all");
 
   const visibleRecordings = useMemo(() => {
@@ -99,28 +152,25 @@ export function LibrarySidebar({
     });
   }, [recentRecordingIds, recordings, section]);
 
-  const filteredRecordings = useMemo(() => {
-    if (!searchText) {
-      return visibleRecordings;
-    }
-    const lower = searchText.toLowerCase();
-    return visibleRecordings.filter(
-      (recording) =>
-        recording.title.toLowerCase().includes(lower) ||
-        recording.fullText.toLowerCase().includes(lower)
-    );
-  }, [searchText, visibleRecordings]);
-  const EmptyState =
-    section === "recents" && visibleRecordings.length === 0
-      ? RecentsEmptyState
-      : SidebarEmptyState;
+  const filteredRecordingResults = useMemo(
+    () => searchRecordings(visibleRecordings, searchText),
+    [searchText, visibleRecordings]
+  );
+  const hasSearch = Boolean(searchText.trim());
+  const EmptyState = getEmptyState({
+    hasSearch,
+    section,
+    visibleRecordingCount: visibleRecordings.length,
+  });
 
   const handleSelectRecording = (
     recordingId: string,
     event: MouseEvent<HTMLButtonElement>
   ) => {
     if (event.shiftKey && selectionAnchorId.current) {
-      const visibleIds = filteredRecordings.map((recording) => recording.id);
+      const visibleIds = filteredRecordingResults.map(
+        ({ recording }) => recording.id
+      );
       const anchorIndex = visibleIds.indexOf(selectionAnchorId.current);
       const recordingIndex = visibleIds.indexOf(recordingId);
 
@@ -144,6 +194,12 @@ export function LibrarySidebar({
     selectRecording(recordingId);
     selectionAnchorId.current = recordingId;
   };
+  const resultLabel =
+    hasSearch && visibleRecordings.length > 0
+      ? `${filteredRecordingResults.length} ${
+          filteredRecordingResults.length === 1 ? "result" : "results"
+        }`
+      : null;
 
   const handleOpenRecordingContextMenu = (recordingId: string) => {
     if (!selectedRecordingIds.includes(recordingId)) {
@@ -152,34 +208,100 @@ export function LibrarySidebar({
     }
   };
 
+  const handleImportAudio = async () => {
+    setImportError(null);
+    let selected: string | null = null;
+    try {
+      selected = await open({
+        filters: [{ name: "Audio", extensions: ["wav", "mp3"] }],
+        multiple: false,
+      });
+    } catch {
+      return;
+    }
+    const sourceAudioPath = Array.isArray(selected) ? selected[0] : selected;
+    if (!sourceAudioPath) {
+      return;
+    }
+
+    const toastId = toast.loading("Importing audio file…");
+    try {
+      await importAudioFile(sourceAudioPath);
+      toast.success("Audio file imported", { id: toastId });
+    } catch (error) {
+      const message = String(error);
+      console.error("Failed to import audio:", error);
+      setImportError(message);
+      toast.error("Failed to import audio", {
+        id: toastId,
+        description: message,
+      });
+    }
+  };
+
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader
         className={cn("gap-3", isCollapsed ? "px-2 pt-8 pb-2" : "mt-6 p-3")}
+        data-tauri-drag-region
       >
-        <SidebarMenuButton
-          className="rounded-md font-medium"
-          onClick={onOpenRecording ?? (() => createRecording())}
-          tooltip="New Recording"
-        >
-          <HugeiconsIcon icon={Mic01Icon} size={20} strokeWidth={2.5} />
-          <span>New Recording</span>
-        </SidebarMenuButton>
+        <div>
+          <ButtonGroup className="w-full">
+            <Button
+              className={cn(
+                "min-w-0 justify-start font-medium",
+                isCollapsed ? "size-9 px-0" : "flex-1"
+              )}
+              onClick={onOpenRecording ?? (() => createRecording())}
+              size="sm"
+              title="New Recording"
+              variant="ghost"
+            >
+              <HugeiconsIcon icon={Mic01Icon} size={20} strokeWidth={2.5} />
+              {!isCollapsed && <span>New Recording</span>}
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  className={cn(isCollapsed ? "size-9 px-0" : "px-2")}
+                  size="sm"
+                  title="Recording options"
+                  variant="ghost"
+                >
+                  <ChevronDown className="size-4" />
+                  <span className="sr-only">Recording options</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  disabled={isImportingAudio}
+                  onSelect={handleImportAudio}
+                >
+                  <Upload className="size-4" />
+                  Upload audio file
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </ButtonGroup>
+          {importError && !isCollapsed && (
+            <p className="mt-2 px-2 text-destructive text-xs">{importError}</p>
+          )}
+        </div>
 
         {!isCollapsed && (
           <div className="relative">
             <SidebarInput
-              className="pr-8 pl-9"
+              className="h-9 px-10 py-0 leading-none"
               onChange={(e) => setSearchText(e.target.value)}
               placeholder="Search recordings..."
               value={searchText}
             />
-            <div className="absolute inset-y-0 left-3 flex items-center justify-center text-muted-foreground">
+            <div className="absolute top-1/2 left-2 flex size-6 -translate-y-1/2 items-center justify-center text-muted-foreground">
               <HugeiconsIcon icon={Search01Icon} size={16} strokeWidth={2} />
             </div>
             {searchText && (
               <Button
-                className="absolute inset-y-0 right-1 h-auto w-8 text-muted-foreground hover:text-foreground"
+                className="absolute top-1/2 right-2 size-6 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 onClick={() => setSearchText("")}
                 size="icon-xs"
                 variant="ghost"
@@ -187,9 +309,14 @@ export function LibrarySidebar({
                 <HugeiconsIcon icon={Cancel01Icon} size={14} strokeWidth={2} />
               </Button>
             )}
+            {resultLabel && (
+              <div className="mt-1 pl-3 text-muted-foreground text-xs">
+                {resultLabel}
+              </div>
+            )}
           </div>
         )}
-        <SidebarMenu>
+        <SidebarMenu className="gap-y-1">
           <SidebarMenuItem>
             <SidebarMenuButton
               isActive={section === "all"}
@@ -219,10 +346,10 @@ export function LibrarySidebar({
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupContent>
-            <SidebarMenu>
-              {filteredRecordings.length > 0 ? null : <EmptyState />}
+            <SidebarMenu className="gap-y-1">
+              {filteredRecordingResults.length > 0 ? null : <EmptyState />}
               <AnimatePresence initial={false}>
-                {filteredRecordings.map((recording) => (
+                {filteredRecordingResults.map((result) => (
                   <motion.li
                     animate={{ opacity: 1, y: 0 }}
                     className="group/menu-item relative"
@@ -230,14 +357,18 @@ export function LibrarySidebar({
                     data-slot="sidebar-menu-item"
                     exit={{ opacity: 0, y: -4 }}
                     initial={{ opacity: 0, y: 4 }}
-                    key={recording.id}
+                    key={result.recording.id}
                     layout
                     transition={LIST_ITEM_TRANSITION}
                   >
                     <RecordingSidebarRow
                       onOpenContextMenu={handleOpenRecordingContextMenu}
                       onSelect={handleSelectRecording}
-                      recording={recording}
+                      recording={result.recording}
+                      searchMatch={{
+                        snippet: result.snippet,
+                        titleSegments: result.titleSegments,
+                      }}
                     />
                   </motion.li>
                 ))}

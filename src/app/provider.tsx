@@ -1,5 +1,6 @@
 import { type ReactNode, Suspense } from "react";
 import { ErrorBoundary } from "react-error-boundary";
+import { Toaster } from "@/components/ui/sonner";
 import { Spinner } from "@/components/ui/spinner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import AppErrorPage from "@/features/errors/app-error";
@@ -14,7 +15,10 @@ export default function AppProvider({ children }: { children: ReactNode }) {
       }
     >
       <ErrorBoundary FallbackComponent={AppErrorPage}>
-        <TooltipProvider>{children}</TooltipProvider>
+        <TooltipProvider>
+          <Toaster />
+          {children}
+        </TooltipProvider>
       </ErrorBoundary>
     </Suspense>
   );

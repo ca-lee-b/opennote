@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import {
   cancelDownload,
   clearAllAudioFiles,
@@ -27,7 +28,11 @@ import {
   listenToDownloadProgress,
 } from "@/features/transcription/api/transcription-service";
 import type { ModelDownloadInfo } from "@/features/transcription/types";
-import { getAppPreferences, setSelectedModelId } from "@/lib/app-preferences";
+import {
+  getAppPreferences,
+  setLiveTranscriptionPreviewEnabled,
+  setSelectedModelId,
+} from "@/lib/app-preferences";
 import { formatBytes } from "@/lib/utils";
 import { DownloadProgress } from "./download-progress";
 import { ModelRightAction } from "./model-actions";
@@ -42,6 +47,10 @@ export function SettingsView() {
   const [selectedModelId, setSelectedModelIdState] = useState(
     () => getAppPreferences().selectedModelId
   );
+  const [
+    liveTranscriptionPreviewEnabled,
+    setLiveTranscriptionPreviewEnabledState,
+  ] = useState(() => getAppPreferences().liveTranscriptionPreviewEnabled);
   const [models, setModels] = useState<ModelDownloadInfo[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(true);
   const [modelsError, setModelsError] = useState<string | null>(null);
@@ -182,6 +191,14 @@ export function SettingsView() {
     setSelectedModelIdState(modelId);
   }, []);
 
+  const handleLiveTranscriptionPreviewChange = useCallback(
+    (enabled: boolean) => {
+      setLiveTranscriptionPreviewEnabled(enabled);
+      setLiveTranscriptionPreviewEnabledState(enabled);
+    },
+    []
+  );
+
   const [isClearingAudio, setIsClearingAudio] = useState(false);
   const [clearAudioError, setClearAudioError] = useState<string | null>(null);
 
@@ -310,6 +327,30 @@ export function SettingsView() {
               </div>
             </div>
           ))}
+        </section>
+
+        <section className="space-y-3">
+          <h3 className="font-medium text-muted-foreground text-sm">
+            Recording
+          </h3>
+          <div className="rounded-xl border border-border bg-card p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex min-w-0 flex-col">
+                <span className="font-medium text-sm tracking-tight">
+                  Live transcription preview
+                </span>
+                <span className="text-muted-foreground text-xs leading-5">
+                  Show live transcript text while recording. Turn this off to
+                  avoid loading the extra preview worker.
+                </span>
+              </div>
+              <Switch
+                checked={liveTranscriptionPreviewEnabled}
+                onCheckedChange={handleLiveTranscriptionPreviewChange}
+                size="sm"
+              />
+            </div>
+          </div>
         </section>
 
         {/* Danger Zone */}

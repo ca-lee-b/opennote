@@ -27,9 +27,9 @@ futures-util = "0.3"
 tokio = { version = "1", features = ["fs"] }
 cpal = "0.15"
 hound = "3.5"
+symphonia = { version = "0.5.5", features = ["mp3", "wav", "pcm"] }
 log = "0.4"
-transcribe-rs = { version = "0.3.11", features = ["whisper-metal"] }
-whisper-rs = { version = "=0.16.0", features = ["coreml"] }
+whisper-rs = { version = "=0.16.0", features = ["coreml", "metal"] }
 sha2 = "0.10"
 zip = "2"
 uuid = { version = "1", features = ["v4"] }
@@ -37,3 +37,6 @@ uuid = { version = "1", features = ["v4"] }
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!
 custom-protocol = ["tauri/custom-protocol"]
+
+[dev-dependencies]
+tempfile = "3"
