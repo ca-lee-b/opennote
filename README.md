@@ -44,8 +44,8 @@ Built with [Tauri v2](https://v2.tauri.app/) (Rust backend), [React 19](https://
 ### Install
 
 ```bash
-git clone https://github.com/caleblee/opennote-rs.git
-cd opennote-rs
+git clone https://github.com/ca-lee-b/opennote.git
+cd opennote
 bun install
 ```
 
@@ -67,7 +67,7 @@ bun run tauri build
 ## Project Structure
 
 ```
-opennote-rs/
+opennote/
 ├── src/                          # Frontend (React + TypeScript)
 │   ├── app/                      # App shell — providers, router, routes
 │   ├── components/ui/            # shadcn/ui primitives
