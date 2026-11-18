@@ -19,6 +19,18 @@ const baseRecording: Recording = {
 };
 
 describe("recording search", () => {
+  test("finds title-only matches", () => {
+    const results = searchRecordings([baseRecording], "planning");
+
+    expect(results).toHaveLength(1);
+    expect(results[0].matchCount).toBe(1);
+    expect(results[0].snippet).toBeNull();
+    expect(results[0].titleSegments).toEqual([
+      { text: "Planning", isMatch: true, start: 0 },
+      { text: " Review", isMatch: false, start: 8 },
+    ]);
+  });
+
   test("returns highlighted recording matches with transcript context", () => {
     const results = searchRecordings([baseRecording], "search");
 
