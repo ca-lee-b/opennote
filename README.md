@@ -72,7 +72,7 @@ opennote-rs/
 │   ├── app/                      # App shell — providers, router, routes
 │   ├── components/ui/            # shadcn/ui primitives
 │   ├── config/                   # Zod-validated env vars
-│   ├── features/
+│   ├── features/                 # Audio capture, transcription, recording library, model settings, and error pages
 │   │   ├── recording/           # Live recording UI, waveform, dialog
 │   │   ├── transcription/       # Transcription service, model types
 │   │   ├── library/             # Recording list, sidebar, detail view
