@@ -78,7 +78,6 @@ opennote-rs/
 │   │   ├── library/             # Recording list, sidebar, detail view
 │   │   ├── settings/            # Model management, download progress
 │   │   ├── errors/              # Error boundary pages
-│   │   └── built-with/          # Tech stack showcase
 │   ├── stores/                   # Zustand stores (recordings)
 │   ├── types/                    # Shared TypeScript types
 │   ├── hooks/                    # Shared custom hooks

@@ -29,9 +29,7 @@ opennote-rs/
 │   ├── config/
 │   │   └── env.ts                # Zod-validated env vars (VITE_ prefix)
 │   ├── features/                 # Feature-based modules
-│   │   ├── built-with/           # "Built with" showcase (SVGs + component)
-│   │   ├── errors/               # Error boundary pages (AppErrorPage, ErrorBase)
-│   │   └── github-star-button/   # GitHub star button feature
+│   │   └── errors/               # Error boundary pages (AppErrorPage, ErrorBase)
 │   ├── hooks/                    # Shared custom hooks (empty, add here)
 │   ├── lib/
 │   │   ├── create-env.ts         # Env validation helper (strips VITE_ prefix)
